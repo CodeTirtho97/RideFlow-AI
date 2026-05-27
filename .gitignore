@@ -1,0 +1,75 @@
+# -----------------------------
+# OS / editor metadata
+# -----------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# -----------------------------
+# Environment / secrets
+# -----------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# -----------------------------
+# Logs
+# -----------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------
+# Python (backend)
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+.tox/
+dist/
+build/
+*.egg-info/
+
+# -----------------------------
+# Node / Vite (frontend)
+# -----------------------------
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# -----------------------------
+# Tooling / local state
+# -----------------------------
+.claude/
+
+# -----------------------------
+# Infrastructure / containers
+# -----------------------------
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+docker-compose.override.yml
