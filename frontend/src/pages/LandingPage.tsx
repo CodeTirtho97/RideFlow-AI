@@ -2,10 +2,43 @@ import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { AppNav } from '../components/AppNav'
 
+const STATS = [
+  { value: '<100ms', label: 'Dispatch Latency', detail: 'from request to driver assigned' },
+  { value: '7', label: 'Ride States', detail: 'enforced FSM, zero invalid transitions' },
+  { value: '3→5 km', label: 'Search Radius', detail: 'expands when all candidates exhausted' },
+  { value: '30 s', label: 'Driver Heartbeat', detail: 'auto-offline on missed ping (Redis TTL)' },
+  { value: '0 polls', label: 'UI Updates', detail: 'WebSocket push only, no polling' },
+]
+
+const HOW_STEPS = [
+  {
+    num: 1,
+    accent: '#2563eb',
+    title: 'Rider Books a Trip',
+    desc: 'A rider enters pickup and drop-off coordinates. The API creates a ride record and immediately hands off a dispatch job to background workers.',
+    tech: 'POST /api/v1/rides → Celery task queued in Redis',
+  },
+  {
+    num: 2,
+    accent: '#7c3aed',
+    title: 'System Finds the Nearest Driver',
+    desc: 'A Celery worker queries the database using real map geometry to find the closest available driver within 3 km. If none, it expands to 5 km. The driver is locked instantly to prevent double-booking.',
+    tech: 'PostGIS ST_DWithin + SELECT FOR UPDATE SKIP LOCKED',
+  },
+  {
+    num: 3,
+    accent: '#16a34a',
+    title: 'Both Sides Update in Real Time',
+    desc: 'The moment a driver is assigned, both apps update instantly — no polling. The backend publishes to Redis channels; WebSocket connections push the update to both clients.',
+    tech: 'Redis Pub/Sub → WebSocket push → rider + driver',
+  },
+]
+
 const FEATURES = [
   {
     icon: '📍',
     bg: '#dbeafe',
+    accent: '#2563eb',
     title: 'Geospatial Dispatch',
     plain: 'Finds the nearest available driver using real GPS coordinates and map geometry — not just straight-line distance.',
     tech: 'PostGIS ST_DWithin + GiST spatial index',
@@ -13,6 +46,7 @@ const FEATURES = [
   {
     icon: '🔒',
     bg: '#dcfce7',
+    accent: '#16a34a',
     title: 'Race Condition Prevention',
     plain: 'Two workers can never assign the same driver to two different riders at the same time — even under peak load.',
     tech: 'SELECT FOR UPDATE SKIP LOCKED',
@@ -20,6 +54,7 @@ const FEATURES = [
   {
     icon: '⚡',
     bg: '#fef3c7',
+    accent: '#d97706',
     title: 'Real-time Updates',
     plain: 'Both the rider and driver see every status change the instant it happens — no page refresh, no polling.',
     tech: 'WebSocket + Redis Pub/Sub fanout',
@@ -27,6 +62,7 @@ const FEATURES = [
   {
     icon: '⚙️',
     bg: '#ede9fe',
+    accent: '#7c3aed',
     title: 'Async Processing',
     plain: 'Ride requests are processed in the background so the API stays fast and responsive under high load.',
     tech: 'Celery + Redis message broker',
@@ -34,16 +70,45 @@ const FEATURES = [
   {
     icon: '📡',
     bg: '#fee2e2',
+    accent: '#dc2626',
     title: 'Location Tracking',
-    plain: "Driver locations are cached for speed and expire automatically if a driver stops sending heartbeats.",
+    plain: 'Driver locations are cached for speed and expire automatically if a driver stops sending heartbeats.',
     tech: 'Redis HASH (30s TTL) + PostgreSQL PostGIS',
   },
   {
     icon: '💰',
     bg: '#fef3c7',
+    accent: '#d97706',
     title: 'Surge Pricing',
     plain: 'When more riders are requesting than drivers are available in an area, fares adjust automatically.',
     tech: 'Demand/supply ratio per geohash zone',
+  },
+]
+
+const INTERVIEW_QA = [
+  {
+    q: 'How do you find the nearest driver?',
+    a: 'PostGIS ST_DWithin query with a GiST spatial index — bounded box scan instead of a full table scan.',
+  },
+  {
+    q: 'How do you prevent two workers assigning the same driver?',
+    a: 'SELECT FOR UPDATE SKIP LOCKED — database-level row lock, no application-level coordination needed.',
+  },
+  {
+    q: 'How do real-time updates reach the rider without polling?',
+    a: 'Celery publishes to a Redis Pub/Sub channel; any WebSocket server instance delivers the push.',
+  },
+  {
+    q: 'How does a driver go offline if they lose connection?',
+    a: 'Driver status lives in Redis with a 30 s TTL. Missed heartbeats let the key expire naturally.',
+  },
+  {
+    q: 'How does the system predict demand before it peaks?',
+    a: 'DBSCAN clustering on ride request density — no preset k, handles irregular hotspot shapes.',
+  },
+  {
+    q: 'How do you keep the booking API fast under load?',
+    a: 'POST /rides returns immediately; Celery handles the multi-step dispatch asynchronously.',
   },
 ]
 
@@ -59,19 +124,41 @@ export default function LandingPage() {
 
       {/* ── Hero ── */}
       <div className="landing-hero">
-        <p className="hero-eyebrow">System Design Portfolio Project</p>
-        <h1 className="hero-title">RideFlow AI</h1>
-        <p className="hero-sub">
-          A production-grade ride dispatch system built from scratch —
-          demonstrating the backend engineering behind apps like Uber and Ola.
-        </p>
-        <div className="hero-actions">
-          <Link to="/playground" className="btn-hero-primary">Try the Playground →</Link>
-          <Link to="/architecture" className="btn-hero-ghost">View Architecture</Link>
+        <div className="hero-dot-overlay" />
+        <div className="hero-content">
+          <p className="hero-eyebrow">System Design Portfolio Project</p>
+          <h1 className="hero-title">RideFlow AI</h1>
+          <p className="hero-sub">
+            A production-grade ride dispatch system built from scratch —
+            demonstrating the backend engineering behind apps like Uber and Ola.
+          </p>
+          <div className="hero-metric-row">
+            <span className="hero-metric-chip">⚡ &lt;100ms dispatch</span>
+            <span className="hero-metric-chip">🔁 7-state lifecycle</span>
+            <span className="hero-metric-chip">📡 WebSocket fan-out</span>
+            <span className="hero-metric-chip">🤖 AI hotspot detection</span>
+          </div>
+          <div className="hero-actions">
+            <Link to="/playground" className="btn-hero-primary">Try the Playground →</Link>
+            <Link to="/architecture" className="btn-hero-ghost">View Architecture</Link>
+          </div>
+          <div className="hero-tech-stack">
+            {['FastAPI', 'PostgreSQL + PostGIS', 'Redis', 'Celery', 'WebSocket', 'React + TypeScript'].map(t => (
+              <span key={t} className="tech-chip">{t}</span>
+            ))}
+          </div>
         </div>
-        <div className="hero-tech-stack">
-          {['FastAPI', 'PostgreSQL + PostGIS', 'Redis', 'Celery', 'WebSocket', 'React + TypeScript'].map(t => (
-            <span key={t} className="tech-chip">{t}</span>
+      </div>
+
+      {/* ── System by the Numbers ── */}
+      <div className="stats-strip">
+        <div className="stats-strip-inner">
+          {STATS.map(s => (
+            <div key={s.label} className="stat-block">
+              <div className="stat-value">{s.value}</div>
+              <div className="stat-label">{s.label}</div>
+              <div className="stat-detail">{s.detail}</div>
+            </div>
           ))}
         </div>
       </div>
@@ -82,33 +169,14 @@ export default function LandingPage() {
           <h2 className="section-title">How a Ride Works</h2>
           <p className="section-desc">The full lifecycle — from booking to drop-off — in three steps.</p>
           <div className="how-grid">
-            <div className="how-card">
-              <div className="how-num">1</div>
-              <div className="how-title">Rider Books a Trip</div>
-              <div className="how-desc">
-                A rider enters pickup and drop-off coordinates. The API creates a ride record and immediately
-                hands off a dispatch job to background workers.
+            {HOW_STEPS.map(step => (
+              <div key={step.num} className="how-card" style={{ borderTop: `3px solid ${step.accent}` }}>
+                <div className="how-num" style={{ background: step.accent }}>{step.num}</div>
+                <div className="how-title">{step.title}</div>
+                <div className="how-desc">{step.desc}</div>
+                <div className="how-tech">{step.tech}</div>
               </div>
-              <div className="how-tech">POST /api/v1/rides → Celery task queued in Redis</div>
-            </div>
-            <div className="how-card">
-              <div className="how-num">2</div>
-              <div className="how-title">System Finds the Nearest Driver</div>
-              <div className="how-desc">
-                A Celery worker queries the database using real map geometry to find the closest available driver
-                within 3 km. If none, it expands to 5 km. The driver is locked instantly to prevent double-booking.
-              </div>
-              <div className="how-tech">PostGIS ST_DWithin + SELECT FOR UPDATE SKIP LOCKED</div>
-            </div>
-            <div className="how-card">
-              <div className="how-num">3</div>
-              <div className="how-title">Both Sides Update in Real Time</div>
-              <div className="how-desc">
-                The moment a driver is assigned, both apps update instantly — no polling.
-                The backend publishes to Redis channels; WebSocket connections push the update to both clients.
-              </div>
-              <div className="how-tech">Redis Pub/Sub → WebSocket push → rider + driver</div>
-            </div>
+            ))}
           </div>
         </div>
       </div>
@@ -177,7 +245,7 @@ export default function LandingPage() {
           </p>
           <div className="feature-grid">
             {FEATURES.map(f => (
-              <div key={f.title} className="feature-card">
+              <div key={f.title} className="feature-card" style={{ borderTop: `3px solid ${f.accent}` }}>
                 <div className="feature-icon" style={{ background: f.bg }}>{f.icon}</div>
                 <div className="feature-title">{f.title}</div>
                 <div className="feature-plain">{f.plain}</div>
@@ -188,18 +256,36 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ── Architecture CTA ── */}
-      <div className="landing-section" style={{ paddingTop: 40, paddingBottom: 52 }}>
-        <div className="arch-banner">
-          <div className="arch-banner-text">
-            <div className="arch-banner-title">Want the full system design breakdown?</div>
-            <div className="arch-banner-sub">
-              Diagrams, dispatch flow, state machines, and tech stack comparisons with Uber, Ola, and Lyft.
+      {/* ── Interview Ready ── */}
+      <div className="landing-section" style={{ paddingTop: 52, paddingBottom: 52 }}>
+        <h2 className="section-title">Every "Design Uber" question — implemented</h2>
+        <p className="section-desc">
+          Each component maps directly to a system design interview question. The answer isn't a whiteboard diagram — it's running code.
+        </p>
+        <div className="interview-grid">
+          {INTERVIEW_QA.map(qa => (
+            <div key={qa.q} className="interview-qa-card">
+              <div className="qa-question">{qa.q}</div>
+              <div className="qa-answer">{qa.a}</div>
             </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Architecture CTA ── */}
+      <div style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
+        <div className="landing-section" style={{ paddingTop: 40, paddingBottom: 52 }}>
+          <div className="arch-banner">
+            <div className="arch-banner-text">
+              <div className="arch-banner-title">Want the full system design breakdown?</div>
+              <div className="arch-banner-sub">
+                Diagrams, dispatch flow, state machines, and tech stack comparisons with Uber, Ola, and Lyft.
+              </div>
+            </div>
+            <Link to="/architecture" className="btn-hero-primary" style={{ flexShrink: 0 }}>
+              View Architecture →
+            </Link>
           </div>
-          <Link to="/architecture" className="btn-hero-primary" style={{ flexShrink: 0 }}>
-            View Architecture →
-          </Link>
         </div>
       </div>
 
