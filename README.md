@@ -6,11 +6,17 @@ A production-style distributed backend system built to implement the concepts
 tested in the "Design Uber/Lyft" system design interview — not as a clone,
 but as a working, deployable backend with a live demo.
 
+<div align="center">
+      
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+</div>
+
+<img width="1408" height="845" alt="image" src="https://github.com/user-attachments/assets/bb5ac6e9-1359-486e-aaeb-19d2ddb9ad94" />
 
 ---
 
