@@ -6,11 +6,11 @@ A production-style distributed backend system built to implement the concepts
 tested in the "Design Uber/Lyft" system design interview — not as a clone,
 but as a working, deployable backend with a live demo.
 
-[![Build Status](https://github.com/tirthoraj/rideflow-ai/actions/workflows/deploy.yml/badge.svg)](https://github.com/tirthoraj/rideflow-ai/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11+-blue)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green)](https://fastapi.tiangolo.com)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+_PostGIS-blue)](https://postgis.net)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
