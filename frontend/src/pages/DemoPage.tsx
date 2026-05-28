@@ -961,7 +961,7 @@ export default function DemoPage() {
             <div className="card-body flex-col gap-12">
               {STEPS.map((step, stepIdx) => {
                 const state = steps[step.key]
-                const comingSoon = 'comingSoon' in step && step.comingSoon
+                const comingSoon = 'comingSoon' in step ? Boolean(step.comingSoon) : false
                 const enabled = isStepEnabled(step.requires, step.key, comingSoon)
                 const isDone    = state === 'done'
                 const isRunning = state === 'running'
@@ -1107,7 +1107,7 @@ export default function DemoPage() {
                 Peak demand snapshot · updates every 8s while unmatched rides exist
               </div>
               <div className="card-body flex-col gap-14">
-                {aiHotspots.length === 0 && steps.ai !== 'idle' && (
+                {aiHotspots.length === 0 && (
                   <div style={{ textAlign: 'center', padding: '16px 8px' }}>
                     <div style={{ fontSize: 28, marginBottom: 10 }}>🟢</div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
