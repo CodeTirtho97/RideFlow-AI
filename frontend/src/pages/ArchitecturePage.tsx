@@ -15,9 +15,9 @@ const VIEW_TABS: { key: ViewKey; label: string }[] = [
 
 const SNAPSHOT = [
   { label: 'Dispatch Trigger', value: '< 150ms', detail: 'API returns quickly while workers process matching.' },
-  { label: 'Realtime Fanout', value: 'Sub-second', detail: 'Redis Pub/Sub -> WebSocket push to every dashboard.' },
+  { label: 'Realtime Fanout', value: 'Sub-second', detail: 'Redis Pub/Sub → WebSocket push to every dashboard.' },
   { label: 'Concurrency Guard', value: 'DB row lock', detail: 'SKIP LOCKED prevents duplicate driver assignment.' },
-  { label: 'Truth Store', value: 'PostgreSQL', detail: 'Ride, driver, and event history are fully auditable.' },
+  { label: 'AI Hotspot Loop', value: 'Every 8s', detail: 'DBSCAN re-runs on live unmatched rides; results stream via WebSocket.' },
 ]
 
 const FLOW_STEPS = [
@@ -102,6 +102,18 @@ const TECH_DECISIONS = [
     scalePath: 'Enforce transitions as policy modules and emit audit events to warehouse.',
     rationale: 'Explicit state model improves debugging, replayability, and compliance readiness.',
   },
+  {
+    area: 'Demand prediction',
+    current: 'DBSCAN clustering on live ride request coordinates (scikit-learn)',
+    scalePath: 'Feed time-of-day, weather, and event data into a supervised model for predictive (not reactive) surge.',
+    rationale: 'DBSCAN requires no preset cluster count and handles irregular hotspot shapes — ideal when demand patterns are unknown in advance.',
+  },
+  {
+    area: 'Driver repositioning',
+    current: 'PostGIS ST_Distance ranked nearest idle drivers per hotspot centroid',
+    scalePath: 'Optimize globally across all hotspots with a matching solver; account for driver acceptance rates.',
+    rationale: 'Spatial proximity is the dominant signal for reposition latency. Simple, fast, and explainable.',
+  },
 ]
 
 const FAILURE_MODES = [
@@ -128,6 +140,12 @@ const FAILURE_MODES = [
     detection: 'WebSocket disconnect event from browser/app network change.',
     response: 'Client reconnects and re-subscribes; server resumes channel stream.',
     impact: 'Short-lived gaps recover automatically without page refresh.',
+  },
+  {
+    mode: 'No demand clusters detected by AI',
+    detection: 'DBSCAN finds fewer than min_samples (3) requests within eps (1.5 km).',
+    response: 'Loop publishes no hotspot batch; UI shows "no clusters detected" empty state.',
+    impact: 'Correct result — sparse demand genuinely has no actionable hotspot. Loop stops cleanly.',
   },
 ]
 

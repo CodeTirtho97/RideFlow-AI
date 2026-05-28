@@ -96,36 +96,36 @@ DEMO_RIDER_NAMES = [
 PRESETS: dict[str, dict] = {
     "light": {
         "label": "Light Traffic",
-        "description": "8 drivers spread across 6 km radius. 5 simultaneous requests.",
+        "description": "10 drivers spread across 10 km radius. 8 simultaneous requests.",
         "what_it_shows": "Happy path: clean dispatch, sub-second assignment, no retries needed.",
-        "supply_demand": "1.6x (supply > demand)",
+        "supply_demand": "1.25x (supply > demand)",
         "center_lat": 12.9716,
         "center_lng": 77.5946,
-        "radius_km": 6.0,
-        "driver_count": 8,
-        "request_count": 5,
+        "radius_km": 10.0,
+        "driver_count": 10,
+        "request_count": 8,
     },
     "moderate": {
         "label": "Moderate Traffic",
-        "description": "25 drivers in 4 km radius. 20 simultaneous requests.",
-        "what_it_shows": "Dispatch retries, radius expansion from 3 km to 5 km, queue latency.",
-        "supply_demand": "1.25x (slight surplus)",
+        "description": "35 drivers in 7 km radius. 35 simultaneous requests.",
+        "what_it_shows": "Dispatch retries, radius expansion from 3 km to 5 km, queue latency under balanced load.",
+        "supply_demand": "1.0x (balanced)",
         "center_lat": 12.9716,
         "center_lng": 77.5946,
-        "radius_km": 4.0,
-        "driver_count": 25,
-        "request_count": 20,
+        "radius_km": 7.0,
+        "driver_count": 35,
+        "request_count": 35,
     },
     "dense": {
-        "label": "Dense — Tech Park Peak",
-        "description": "45 drivers in 2 km² (Whitefield, Bengaluru). 50 simultaneous requests.",
-        "what_it_shows": "Queue saturation, surge pricing, SELECT FOR UPDATE race prevention, AI fires.",
-        "supply_demand": "0.9x (demand exceeds supply)",
+        "label": "Dense — Peak Hour",
+        "description": "70 drivers in 5 km radius (Whitefield, Bengaluru). 100 simultaneous requests.",
+        "what_it_shows": "Queue saturation, surge pricing, SELECT FOR UPDATE race prevention, multiple AI hotspot clusters.",
+        "supply_demand": "0.7x (demand exceeds supply)",
         "center_lat": 12.9698,
         "center_lng": 77.7500,
-        "radius_km": 2.0,
-        "driver_count": 45,
-        "request_count": 50,
+        "radius_km": 5.0,
+        "driver_count": 70,
+        "request_count": 100,
     },
 }
 
@@ -192,7 +192,7 @@ async def seed_drivers(
     for i in range(driver_count):
         lat, lng = _random_coord(cfg["center_lat"], cfg["center_lng"], cfg["radius_km"])
         name, phone = pool[i]
-        unique_phone = f"{phone}-{run_tag}"
+        unique_phone = f"{phone}-{run_tag}-{i}"
 
         driver = Driver(
             name=name,
@@ -274,8 +274,8 @@ async def _movement_loop() -> None:
                 loc = await redis.hgetall(f"driver:location:{driver_id}")
                 if not loc:
                     continue
-                lat = float(loc["lat"]) + random.uniform(-0.0002, 0.0002)
-                lng = float(loc["lng"]) + random.uniform(-0.0002, 0.0002)
+                lat = float(loc["lat"]) + random.uniform(-0.0008, 0.0008)
+                lng = float(loc["lng"]) + random.uniform(-0.0008, 0.0008)
                 await redis.hset(
                     f"driver:location:{driver_id}",
                     mapping={"lat": str(round(lat, 6)), "lng": str(round(lng, 6))},
@@ -290,11 +290,11 @@ async def _movement_loop() -> None:
                         "lng": lng,
                     }),
                 )
-            await asyncio.sleep(4)
+            await asyncio.sleep(2)
         except asyncio.CancelledError:
             break
         except Exception:
-            await asyncio.sleep(4)
+            await asyncio.sleep(2)
 
 
 @router.post("/requests")
@@ -380,20 +380,6 @@ async def create_ride_requests(
     }
 
 
-@router.post("/ai/run")
-async def run_ai_prediction() -> dict:
-    """Phase 5 stub — DBSCAN demand prediction."""
-    return {
-        "status": "phase_5_pending",
-        "message": (
-            "AI prediction layer is implemented in Phase 5. "
-            "When built, this endpoint runs DBSCAN clustering on the last 30 minutes of "
-            "ride request density, detects hotspots where demand > supply, and pushes "
-            "driver repositioning recommendations to the admin:alerts Redis channel."
-        ),
-    }
-
-
 @router.post("/reset")
 async def reset_demo(
     db: AsyncSession = Depends(get_db),
@@ -405,6 +391,9 @@ async def reset_demo(
     if _movement_task and not _movement_task.done():
         _movement_task.cancel()
         _movement_task = None
+
+    from app.api.ai import stop_ai_loop
+    stop_ai_loop()
 
     await db.execute(text("UPDATE drivers SET active_ride_id = NULL"))
     await db.execute(text("UPDATE rides SET driver_id = NULL"))

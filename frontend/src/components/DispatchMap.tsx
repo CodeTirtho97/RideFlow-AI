@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Circle, Polyline, Tooltip, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -9,7 +9,8 @@ export interface MapDriver {
   lat: number
   lng: number
   status: 'available' | 'assigned' | 'arriving' | 'on_trip'
-  glowing?: boolean  // show concentric pulsing rings (driver's own marker on Driver page)
+  glowing?: boolean      // show concentric pulsing rings (driver's own marker on Driver page)
+  reposition?: boolean   // show orange pulsing ring (AI-recommended reposition target)
 }
 
 export interface LegendItem {
@@ -55,6 +56,7 @@ interface Props {
   uberStyle?: boolean            // clean Positron/DarkMatter tile + permanent labels (Driver/Rider pages)
   showTooltips?: boolean         // false = suppress all tooltips (Playground — legend is enough)
   searchCircle?: { lat: number; lng: number; radiusKm: number }
+  hotspots?: Array<{ center_lat: number; center_lng: number; radius_km: number; demand: number; shortage: number }>
   riderLocation?: { lat: number; lng: number; label?: string }
   legend?: LegendItem[]
   onAnimComplete?: (key: string) => void   // fired when an animation key finishes
@@ -115,8 +117,8 @@ const DRIVER_COLORS: Record<string, string> = {
 // Cached driver icons: keyed by "status-num"
 const _driverIconCache = new Map<string, L.DivIcon>()
 
-function getDriverIcon(status: string, glowing?: boolean, num?: number): L.DivIcon {
-  const key  = `${status}:${glowing ? 'g' : ''}:${num ?? ''}`
+function getDriverIcon(status: string, glowing?: boolean, num?: number, reposition?: boolean): L.DivIcon {
+  const key  = `${status}:${glowing ? 'g' : ''}:${num ?? ''}:${reposition ? 'r' : ''}`
   if (_driverIconCache.has(key)) return _driverIconCache.get(key)!
 
   const color = DRIVER_COLORS[status] ?? '#6b7280'
@@ -128,6 +130,11 @@ function getDriverIcon(status: string, glowing?: boolean, num?: number): L.DivIc
     <span style="position:absolute;inset:-11px;border-radius:50%;border:2px solid ${color};opacity:0.5;animation:map-ping 2s ease-out infinite 0.7s;pointer-events:none;"></span>
   ` : ''
 
+  // Orange blinking border — AI reposition recommendation
+  const repositionRing = reposition ? `
+    <span style="position:absolute;inset:-4px;border-radius:50%;border:2.5px solid #f97316;animation:reposition-blink 0.9s ease-in-out infinite;pointer-events:none;"></span>
+  ` : ''
+
   // Small numbered badge for Playground
   const numBadge = num != null
     ? `<span style="position:absolute;top:-5px;right:-7px;background:white;color:${color};border:1.5px solid ${color};border-radius:4px;padding:0 3px;font-size:8px;font-weight:700;line-height:1.5;font-family:Inter,system-ui,sans-serif;">${num}</span>`
@@ -137,7 +144,7 @@ function getDriverIcon(status: string, glowing?: boolean, num?: number): L.DivIc
     className: '',
     iconSize:  [size, size],
     iconAnchor:[size / 2, size / 2],
-    html: `<span style="position:relative;display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${numBadge}${rings}</span>`,
+    html: `<span style="position:relative;display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${numBadge}${rings}${repositionRing}</span>`,
   })
   _driverIconCache.set(key, icon)
   return icon
@@ -268,13 +275,14 @@ function FitAllPoints({
 
 // Smart camera: phase-aware bounds fitting with live tracking during animations
 function SmartCamera({
-  drivers, trips, animPos, riderLocation, searchCircle, center, zoom, fitTrigger, staticCamera,
+  drivers, trips, animPos, riderLocation, searchCircle, hotspots, center, zoom, fitTrigger, staticCamera,
 }: {
   drivers: Record<string, MapDriver>
   trips: Record<string, MapTrip>
   animPos: Record<string, [number, number]>
   riderLocation?: { lat: number; lng: number }
   searchCircle?: { lat: number; lng: number; radiusKm: number }
+  hotspots?: Array<{ center_lat: number; center_lng: number; radius_km: number; demand: number; shortage: number }>
   center: [number, number]
   zoom: number
   fitTrigger: number
@@ -285,6 +293,26 @@ function SmartCamera({
   // Always-current fit function — updated each render, called via ref to avoid stale closures
   const fitRef = useRef<() => void>(() => {})
   fitRef.current = () => {
+    // ── Phase 0: AI Hotspots — zoom to show circles fully ───────────────────────────────────
+    if (!staticCamera && hotspots && hotspots.length > 0) {
+      const valid = hotspots.filter(h => h.center_lat && h.center_lng)
+      if (valid.length > 0) {
+        // Start from first hotspot and extend by each circle's actual radius in degrees
+        const first = valid[0]
+        const firstRad = (first.radius_km * 1.6) / 111.0
+        const bounds = L.latLngBounds(
+          [first.center_lat - firstRad, first.center_lng - firstRad],
+          [first.center_lat + firstRad, first.center_lng + firstRad],
+        )
+        valid.slice(1).forEach(h => {
+          const rad = (h.radius_km * 1.6) / 111.0
+          bounds.extend([h.center_lat - rad, h.center_lng - rad])
+          bounds.extend([h.center_lat + rad, h.center_lng + rad])
+        })
+        map.fitBounds(bounds, { padding: [30, 30], animate: true, duration: 0.8, maxZoom: 15 })
+        return
+      }
+    }
     // ── Phase 1: Searching — fit the search circle ──────────────────────────
     if (!staticCamera && searchCircle) {
       const { lat, lng, radiusKm } = searchCircle
@@ -410,6 +438,7 @@ export function DispatchMap({
   uberStyle = false,
   showTooltips = true,
   searchCircle,
+  hotspots,
   riderLocation,
   legend,
   onAnimComplete,
@@ -599,7 +628,7 @@ export function DispatchMap({
       <FitAllPoints points={focusPoints} center={center} zoom={zoom} trigger={focusTrigger} />
       <SmartCamera
         drivers={drivers} trips={trips} animPos={animPos}
-        riderLocation={riderLocation} searchCircle={searchCircle}
+        riderLocation={riderLocation} searchCircle={searchCircle} hotspots={hotspots}
         center={center} zoom={zoom} fitTrigger={fitTrigger}
         staticCamera={staticCamera}
       />
@@ -618,7 +647,7 @@ export function DispatchMap({
       {/* ── Drivers — colored circle, glow rings only for driver's own marker ── */}
       {driverList.map(driver => {
         const pos  = animPos[driver.id] ?? ([driver.lat, driver.lng] as [number, number])
-        const icon = getDriverIcon(driver.status, driver.glowing, showNumbers ? driverNumMap[driver.id] : undefined)
+        const icon = getDriverIcon(driver.status, driver.glowing, showNumbers ? driverNumMap[driver.id] : undefined, driver.reposition)
         return <Marker key={driver.id} position={pos} icon={icon} />
       })}
 
@@ -696,6 +725,34 @@ export function DispatchMap({
           />
         </>
       )}
+
+      {/* ── AI Hotspot circles ── */}
+      {hotspots && hotspots.map((hotspot, idx) => {
+        if (!hotspot.center_lat || !hotspot.center_lng) return null
+        return (
+          <React.Fragment key={`hotspot-${idx}`}>
+            <Circle
+              center={[hotspot.center_lat, hotspot.center_lng]}
+              radius={hotspot.radius_km * 1000 * 1.35}
+              pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.05, weight: 1, opacity: 0.35, className: 'hotspot-glow-outer' }}
+            />
+            <Circle
+              center={[hotspot.center_lat, hotspot.center_lng]}
+              radius={hotspot.radius_km * 1000}
+              pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.18, weight: 2.5, opacity: 0.85, className: 'hotspot-glow' }}
+            />
+            <Marker
+              position={[hotspot.center_lat, hotspot.center_lng]}
+              icon={L.divIcon({
+                html: `<div style="background: rgba(185,28,28,0.88); color: #fff; padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; letter-spacing: 0.3px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);">Demand Hotspot</div>`,
+                className: '',
+                iconSize: [120, 24],
+                iconAnchor: [60, 38],
+              })}
+            />
+          </React.Fragment>
+        )
+      })}
     </MapContainer>
     </div>
   )

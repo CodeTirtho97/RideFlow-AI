@@ -24,9 +24,12 @@ import { DispatchMap, fetchRoute } from '../components/DispatchMap'
 import type { MapDriver, MapTrip, MapAnimEvent, LegendItem } from '../components/DispatchMap'
 
 const DRIVER_LEGEND: LegendItem[] = [
-  { label: 'You',      color: '#16a34a', shape: 'ring' },
-  { label: 'Pickup',   color: '#16a34a', shape: 'pin'  },
-  { label: 'Drop-off', color: '#dc2626', shape: 'pin'  },
+  { label: 'You — available',  color: '#16a34a', shape: 'ring' },
+  { label: 'You — assigned',   color: '#d97706', shape: 'ring' },
+  { label: 'You — arriving',   color: '#ea580c', shape: 'ring' },
+  { label: 'You — on trip',    color: '#2563eb', shape: 'ring' },
+  { label: 'Pickup point',     color: '#16a34a', shape: 'pin'  },
+  { label: 'Drop-off point',   color: '#dc2626', shape: 'pin'  },
 ]
 
 const DEFAULT_LAT = '12.9716'
@@ -551,7 +554,7 @@ export default function DriverDashboard() {
           driverId: driverId,
           fromLat: from[0], fromLng: from[1],
           toLat: to[0],     toLng: to[1],
-          durationMs: 14000,
+          durationMs: 12000,
           path,
         }])
       })
@@ -568,7 +571,7 @@ export default function DriverDashboard() {
           driverId: driverId,
           fromLat: from[0], fromLng: from[1],
           toLat: to[0],     toLng: to[1],
-          durationMs: 18000,
+          durationMs: 16000,
           path,
         }])
       })

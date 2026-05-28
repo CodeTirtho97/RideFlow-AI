@@ -8,9 +8,20 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import type { WsStatus } from '../hooks/useWebSocket'
 import { InfoModal } from '../components/InfoModal'
 import { demoSeed, demoMove, demoRequests, demoAiRun, demoReset, getMetrics } from '../api/client'
-import type { SystemMetrics } from '../api/client'
+import { useTheme } from '../hooks/useTheme'
+import type { SystemMetrics, AiHotspot } from '../api/client'
 import { DispatchMap, fetchRoute } from '../components/DispatchMap'
-import type { MapDriver, MapTrip, MapAnimEvent } from '../components/DispatchMap'
+import type { MapDriver, MapTrip, MapAnimEvent, LegendItem } from '../components/DispatchMap'
+
+const PLAYGROUND_LEGEND: LegendItem[] = [
+  { label: 'Available',        color: '#16a34a', shape: 'dot'  },
+  { label: 'Assigned',         color: '#d97706', shape: 'dot'  },
+  { label: 'En Route',         color: '#ea580c', shape: 'dot'  },
+  { label: 'On Trip',          color: '#2563eb', shape: 'dot'  },
+  { label: 'Reposition — AI',  color: '#f97316', shape: 'ring' },
+  { label: 'Pickup',           color: '#16a34a', shape: 'pin'  },
+  { label: 'Drop-off',         color: '#dc2626', shape: 'pin'  },
+]
 import { useToast } from '../components/Toast'
 import { MetricsDetailModal } from '../components/MetricsDetailModal'
 import type { MetricType, MetricItem } from '../components/MetricsDetailModal'
@@ -27,17 +38,17 @@ type Preset = 'light' | 'moderate' | 'dense'
 type StepState = 'idle' | 'running' | 'done' | 'error'
 
 const PRESET_MAP: Record<string, { center: [number, number]; zoom: number }> = {
-  light:    { center: [12.9758, 77.5956], zoom: 13 },
-  moderate: { center: [12.9758, 77.5956], zoom: 13 },
-  dense:    { center: [12.9698, 77.7499], zoom: 14 },
+  light:    { center: [12.9758, 77.5956], zoom: 12 },
+  moderate: { center: [12.9758, 77.5956], zoom: 12 },
+  dense:    { center: [12.9698, 77.7499], zoom: 13 },
 }
 
 const PRESET_META = {
   light: {
     label: 'Light Traffic',
-    drivers: 8,
-    requests: 5,
-    radius: '6 km',
+    drivers: 10,
+    requests: 8,
+    radius: '10 km',
     zone: 'MG Road, Bengaluru',
     supplyLabel: 'Plenty of drivers',
     supplyClass: 'badge-green',
@@ -47,9 +58,9 @@ const PRESET_META = {
   },
   moderate: {
     label: 'Moderate Traffic',
-    drivers: 15,
-    requests: 15,
-    radius: '4 km',
+    drivers: 35,
+    requests: 35,
+    radius: '7 km',
     zone: 'MG Road, Bengaluru',
     supplyLabel: 'Balanced supply',
     supplyClass: 'badge-yellow',
@@ -59,15 +70,15 @@ const PRESET_META = {
   },
   dense: {
     label: 'Dense — Peak Hour',
-    drivers: 25,
-    requests: 40,
-    radius: '2 km',
+    drivers: 70,
+    requests: 100,
+    radius: '5 km',
     zone: 'Whitefield, Bengaluru',
     supplyLabel: 'More riders than drivers',
     supplyClass: 'badge-red',
     supplySymbol: '<',
     supplyColor: '#dc2626',
-    shows: 'Demand is 60% above supply — expect cancellations, heavy lock contention, and surge pricing.',
+    shows: 'Demand is 43% above supply — expect cancellations, heavy lock contention, surge pricing, and multiple AI hotspot clusters.',
   },
 } as const
 
@@ -84,7 +95,7 @@ const STEPS = [
     key: 'move' as const,
     label: 'Step 2: Simulate Movement',
     plain: 'Starts a background loop that nudges each driver\'s GPS position every 4 seconds — simulating real drivers moving around the city.',
-    techNote: 'asyncio background task · ±0.0002° random walk every 4s · Redis HASH updated with TTL refresh · shows location staleness detection',
+    techNote: 'asyncio background task · ±0.0008° random walk every 2s (~88m/update) · Redis HASH updated with TTL refresh · shows location staleness detection',
     buttonLabel: 'Start Movement',
     requires: 'seed' as const,
   },
@@ -99,11 +110,10 @@ const STEPS = [
   {
     key: 'ai' as const,
     label: 'Step 4: Run AI Prediction',
-    plain: 'Runs the AI engine to spot where demand is clustering — the kind of hotspot detection that would trigger surge pricing in a real app.',
-    techNote: 'DBSCAN clustering on ride request density · detects zones where requests > drivers × threshold · triggers surge multiplier',
-    buttonLabel: 'Run AI Prediction',
+    plain: 'Starts a live DBSCAN loop that detects demand hotspots every 8 seconds — updating in real time as dispatch resolves rides and drivers change state.',
+    techNote: 'DBSCAN clustering re-runs every 8s · Redis Pub/Sub pushes updates to WebSocket · confidence from cluster tightness · nearest drivers via ST_Distance',
+    buttonLabel: 'Start AI Loop',
     requires: 'requests' as const,
-    comingSoon: true,
   },
 ]
 
@@ -126,6 +136,7 @@ function tech(data: Record<string, unknown>, fallback: string) {
 export default function DemoPage() {
   useEffect(() => { document.title = 'Playground | RideFlow AI' }, [])
   const { toast } = useToast()
+  const { theme } = useTheme()
 
   const [preset, setPreset] = useState<Preset>('light')
   const [steps, setSteps] = useState<Record<string, StepState>>({
@@ -141,6 +152,8 @@ export default function DemoPage() {
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([])
   const [cancelledRideLog, setCancelledRideLog] = useState<{ rideId: string; at: string }[]>([])
   const [detailModal, setDetailModal] = useState<{ type: MetricType; count: number; items?: MetricItem[] } | null>(null)
+  const [aiHotspots, setAiHotspots] = useState<AiHotspot[]>([])
+
 
   // ── Map state ──────────────────────────────────────────────────────────
   // Refs let the WS callback read current values without stale closure issues
@@ -268,7 +281,7 @@ export default function DemoPage() {
             fetchRoute(fromLat, fromLng, toLat, toLng).then(path => {
               setMapAnimEvents(prev => [
                 ...prev.filter(e => e.key !== animKey),
-                { key: animKey, rideId, phase: 'arriving', driverId, fromLat, fromLng, toLat, toLng, durationMs: 18_000, path },
+                { key: animKey, rideId, phase: 'arriving', driverId, fromLat, fromLng, toLat, toLng, durationMs: 12_000, path },
               ])
             })
           }
@@ -295,7 +308,7 @@ export default function DemoPage() {
             fetchRoute(fromLat, fromLng, toLat, toLng).then(path => {
               setMapAnimEvents(prev => [
                 ...prev.filter(e => e.key !== animKey),
-                { key: animKey, rideId, phase: 'on_trip', driverId, fromLat, fromLng, toLat, toLng, durationMs: 20_000, path },
+                { key: animKey, rideId, phase: 'on_trip', driverId, fromLat, fromLng, toLat, toLng, durationMs: 16_000, path },
               ])
             })
           }
@@ -357,6 +370,25 @@ export default function DemoPage() {
           return { ...prev, [driverId]: { ...d, lat, lng } }
         })
       }
+    } else if (event === 'ai_cycle_update') {
+      const incoming = (data.hotspots as AiHotspot[]) || []
+      if (incoming.length > 0) {
+        addLog(logEntry('event',
+          `AI update: ${incoming.length} hotspot(s) detected`,
+          incoming.map(h => `${h.zone_name} — shortage: ${h.shortage}, unmatched: ${h.unmatched_pct}%`).join(' | '),
+        ))
+      }
+      // Replace entire hotspot array — no accumulation
+      setAiHotspots(incoming)
+      // Reset all reposition flags then mark new candidates
+      const allRepoIds = new Set(incoming.flatMap(h => h.nearest_drivers.map(d => d.id)))
+      setMapDrivers(prev => {
+        const next = { ...prev }
+        Object.keys(next).forEach(id => {
+          next[id] = { ...next[id], reposition: allRepoIds.has(id) }
+        })
+        return next
+      })
     }
   }, [addLog, refreshMetrics, setMapDrivers, setMapTrips, setMapAnimEvents, setCancelledRideLog])
 
@@ -523,11 +555,25 @@ export default function DemoPage() {
 
   const handleAiRun = async () => {
     setStep('ai', 'running')
-    addLog(logEntry('info', 'Running the AI demand predictor to detect hotspots...', 'POST /api/demo/ai/run · DBSCAN clustering (Phase 5 preview)'))
+    addLog(logEntry('info', 'Starting AI hotspot detection loop...', `POST /api/demo/ai/run · DBSCAN re-runs every 8s · publishes live updates via WebSocket`))
     try {
       const res = await demoAiRun()
-      setStep('ai', res.data.status === 'phase_5_pending' ? 'done' : 'done')
-      addLog(logEntry('system', res.data.message, 'Phase 5: ML demand forecasting + proactive surge pricing'))
+      setStep('ai', 'done')  // 'done' here means "loop is active"
+
+      // Log main result
+      addLog(logEntry('event', res.data.message, `Hotspots found: ${res.data.hotspots_found}`))
+
+      // Log each hotspot with details
+      if (res.data.hotspots.length > 0) {
+        res.data.hotspots.forEach((hotspot, idx) => {
+          addLog(logEntry('system',
+            `Hotspot ${idx + 1}: ${hotspot.zone_name}`,
+            `Demand: ${hotspot.demand} rides | Supply: ${hotspot.drivers_nearby} drivers | Shortage: ${hotspot.shortage} | Confidence: ${(hotspot.confidence * 100).toFixed(0)}% | Radius: ${hotspot.radius_km}km`,
+          ))
+        })
+      } else {
+        addLog(logEntry('info', 'No significant hotspots detected — demand is evenly distributed.', 'Increase request count or enable Step 3 again'))
+      }
     } catch (err) {
       setStep('ai', 'error')
       addLog(logEntry('error', `AI run failed: ${apiError(err)}`))
@@ -546,6 +592,8 @@ export default function DemoPage() {
       setMapTrips(() => ({}))
       setMapAnimEvents([])
       setMapFocusTrigger(0)
+      setAiHotspots([])
+      setCancelledRideLog([])
       addLog(logEntry('event', res.data.message))
       addLog(logEntry('system', '─── Simulation reset. Previous history kept. Select a scenario and start again when ready. ───'))
     } catch (err) {
@@ -568,6 +616,8 @@ export default function DemoPage() {
   const isStepEnabled = (requires: string | null, key: string, comingSoon?: boolean): boolean => {
     if (comingSoon) return false
     if (steps[key] === 'running') return false
+    // AI step can always be re-run; all other steps lock once done
+    if (steps[key] === 'done' && key !== 'ai') return false
     if (!requires) return true
     return steps[requires] === 'done'
   }
@@ -596,6 +646,22 @@ export default function DemoPage() {
   const completedNow = by.completed ?? 0
   const onTripNow = by.on_trip ?? 0
   const arrivingNow = by.driver_arriving ?? 0
+
+  // Dispatch Snapshot derived stats
+  const dsTotal = completedNow + cancelledNow
+  const dsSuccessRate = dsTotal > 0 ? Math.round((completedNow / dsTotal) * 100) : 0
+  const dsAttempts = recentMatches.map(m => m.attempt ?? 1).filter(a => a > 0)
+  const dsAvgRetries = dsAttempts.length > 0 ? (dsAttempts.reduce((a, b) => a + b, 0) / dsAttempts.length).toFixed(1) : '—'
+  const dsMaxRetries = dsAttempts.length > 0 ? Math.max(...dsAttempts) : 0
+  const dsFares = recentMatches.filter(m => m.at.startsWith('✓')).map(m => parseFloat(m.at.replace('✓ ₹', ''))).filter(f => !isNaN(f))
+  const dsAvgFare = dsFares.length > 0 ? (dsFares.reduce((a, b) => a + b, 0) / dsFares.length).toFixed(0) : null
+
+  const hotspotStatusColor = (s: string) =>
+    s === 'Critical' ? 'var(--red)' : s === 'High' ? 'var(--orange)' : s === 'Moderate' ? 'var(--yellow)' : 'var(--green)'
+  const tooltipBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+  const tooltipBorder = theme === 'dark' ? '#333' : '#d1d5db'
+  const tooltipText = theme === 'dark' ? '#f0f0f0' : '#111827'
+  const tooltipShadow = theme === 'dark' ? '0 8px 24px rgba(0,0,0,0.6)' : '0 6px 20px rgba(0,0,0,0.12)'
 
   return (
     <div className="app-shell">
@@ -713,6 +779,7 @@ export default function DemoPage() {
                   center={PRESET_MAP[preset]?.center ?? [12.9758, 77.5956]}
                   zoom={PRESET_MAP[preset]?.zoom ?? 13}
                   focusTrigger={mapFocusTrigger}
+                  hotspots={aiHotspots}
                   showNumbers
                   showTooltips={false}
                   staticCamera
@@ -737,29 +804,38 @@ export default function DemoPage() {
                     Legend
                   </div>
 
-                  {/* Drivers — car icon on colored circle */}
+                  {/* Drivers */}
                   {[
                     { color: '#16a34a', label: 'Available' },
                     { color: '#d97706', label: 'Assigned' },
-                    { color: '#ea580c', label: 'En Route' },
+                    { color: '#ea580c', label: 'Arriving' },
                     { color: '#2563eb', label: 'On Trip' },
                   ].map(({ color, label }) => (
                     <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
                       <span style={{
-                        display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        width: 22, height: 22, borderRadius: '50%', background: color,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 18, height: 18, borderRadius: '50%', background: color,
                         border: '2px solid white', boxShadow: '0 1px 4px rgba(0,0,0,0.2)', flexShrink: 0,
-                      }}>
-                        <svg viewBox="0 0 18 13" width="12" height="9">
-                          <rect x="0.5" y="3.5" width="17" height="7" rx="1.5" fill="white"/>
-                          <path d="M3.5 3.5L5.5 0.5H12.5L14.5 3.5" fill="white"/>
-                          <circle cx="4.5" cy="11" r="1.8" fill="rgba(0,0,0,0.35)"/>
-                          <circle cx="13.5" cy="11" r="1.8" fill="rgba(0,0,0,0.35)"/>
-                        </svg>
-                      </span>
+                      }} />
                       <span style={{ fontSize: 11, fontWeight: 500, color: '#1e293b', fontFamily: 'Inter, system-ui, sans-serif' }}>{label}</span>
                     </div>
                   ))}
+
+                  {/* AI markers — shown only after Step 4 */}
+                  {aiHotspots.length > 0 && (
+                    <>
+                      <div style={{ borderTop: '1px solid #e2e8f0', margin: '6px 0 6px' }} />
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#db2777', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>AI Detected</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: '50%', border: '2.5px solid #f97316', display: 'inline-block', flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, fontWeight: 500, color: '#1e293b', fontFamily: 'Inter, system-ui, sans-serif' }}>Reposition target</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'rgba(220,38,38,0.18)', border: '2px solid #dc2626', display: 'inline-block', flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, fontWeight: 500, color: '#1e293b', fontFamily: 'Inter, system-ui, sans-serif' }}>Demand hotspot</span>
+                      </div>
+                    </>
+                  )}
 
                   {/* Divider */}
                   <div style={{ borderTop: '1px solid #e2e8f0', margin: '7px 0' }} />
@@ -786,9 +862,9 @@ export default function DemoPage() {
                   {/* Route lines */}
                   <div style={{ borderTop: '1px solid #e2e8f0', margin: '7px 0' }} />
                   {[
-                    { color: '#ea580c', dash: '8 5', label: 'To Pickup' },
-                    { color: '#2563eb', dash: '',    label: 'Active Route' },
-                    { color: '#94a3b8', dash: '4 7', label: 'Planned' },
+                    { color: '#ea580c', dash: '8 5', label: 'Driver → Pickup' },
+                    { color: '#2563eb', dash: '',    label: 'Trip route' },
+                    { color: '#94a3b8', dash: '4 7', label: 'Planned path' },
                   ].map(({ color, dash, label }) => (
                     <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
                       <svg width="20" height="6" style={{ flexShrink: 0 }}>
@@ -883,77 +959,90 @@ export default function DemoPage() {
               </div>
             </div>
             <div className="card-body flex-col gap-12">
-              {steps.seed === 'done' && (
-                <div className="seed-ready-callout">
-                  <div className="seed-ready-copy">
-                    <span className="seed-ready-badge">Step 1 done</span>
-                    <p className="seed-ready-text">
-                      Driver pool is ready. Admin stream is active and will show live dispatch events.
-                    </p>
-                  </div>
-                  <a
-                    href="/admin"
-                    target="_blank"
-                    rel="noopener"
-                    className="seed-ready-link"
-                  >
-                    View Admin Stream
-                  </a>
-                </div>
-              )}
-
-              {STEPS.map((step) => {
+              {STEPS.map((step, stepIdx) => {
                 const state = steps[step.key]
                 const comingSoon = 'comingSoon' in step && step.comingSoon
                 const enabled = isStepEnabled(step.requires, step.key, comingSoon)
-                const icon = stepIcon(step.key)
+                const isDone    = state === 'done'
+                const isRunning = state === 'running'
+                const isError   = state === 'error'
+                const isLocked  = !enabled && !comingSoon
+
+                // Step number circle color
+                const circleColor = isDone ? 'var(--green)' : isError ? 'var(--red)' : isRunning ? 'var(--blue)' : isLocked ? 'var(--text-muted)' : 'var(--blue)'
+                const circleBg    = isDone ? 'rgba(22,163,74,0.12)' : isError ? 'rgba(220,38,38,0.12)' : isRunning ? 'rgba(37,99,235,0.12)' : 'rgba(0,0,0,0.06)'
+
+                // Step number content
+                const circleContent = isDone ? '✓' : isError ? '✕' : isRunning ? '…' : String(stepIdx + 1)
+
+                // Card accent
+                const borderColor = isDone ? 'rgba(22,163,74,0.3)' : isError ? 'rgba(220,38,38,0.3)' : isRunning ? 'rgba(37,99,235,0.25)' : 'var(--border)'
+                const bgColor = isDone ? 'rgba(22,163,74,0.04)' : isError ? 'rgba(220,38,38,0.04)' : 'var(--surface)'
+
+                // Short step name (without "Step N: " prefix)
+                const shortLabel = step.label.replace(/^Step \d+:\s*/, '')
 
                 return (
                   <div key={step.key} style={{
-                    padding: '12px 14px',
-                    borderRadius: 6,
-                    border: `1px solid ${comingSoon ? 'var(--border)' : state === 'done' ? 'var(--border-success)' : state === 'error' ? 'var(--border-error)' : 'var(--border)'}`,
-                    background: comingSoon ? 'var(--surface)' : state === 'done' ? 'var(--surface-success)' : state === 'error' ? 'var(--surface-error)' : 'var(--gray-light)',
-                    opacity: comingSoon ? 0.6 : enabled ? 1 : 0.55,
+                    borderRadius: 8,
+                    border: `1px solid ${borderColor}`,
+                    background: bgColor,
+                    opacity: isLocked ? 0.5 : 1,
+                    transition: 'border-color 0.2s, background 0.2s, opacity 0.2s',
+                    overflow: 'hidden',
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flex: 1 }}>
-                        {step.label}
-                        {comingSoon && (
-                          <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, background: '#ede9fe', color: '#7c3aed', padding: '2px 6px', borderRadius: 4 }}>
-                            Phase 5 — Coming Soon
-                          </span>
-                        )}
-                        {!comingSoon && icon && (
-                          <span style={{ marginLeft: 6, color: state === 'done' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--text-muted)' }}>
-                            {icon}
-                          </span>
-                        )}
+                    {/* Header row: number + title + button */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{
+                        width: 22, height: 22, borderRadius: '50%', background: circleBg,
+                        color: circleColor, fontSize: 11, fontWeight: 800,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                        border: `1.5px solid ${circleColor}`,
+                      }}>
+                        {circleContent}
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', flex: 1, lineHeight: 1.2 }}>
+                        {shortLabel}
                       </span>
                       <button
                         className={stepBtnClass(step.key)}
+                        style={{ flexShrink: 0 }}
                         onClick={
-                          step.key === 'seed' ? handleSeed :
-                          step.key === 'move' ? handleMove :
+                          step.key === 'seed'     ? handleSeed :
+                          step.key === 'move'     ? handleMove :
                           step.key === 'requests' ? handleRequests :
                           handleAiRun
                         }
                         disabled={!enabled}
                       >
-                        {steps[step.key] === 'running' ? 'Running...' : step.buttonLabel}
+                        {isRunning ? 'Running…' : isDone && step.key === 'ai' ? 'Restart' : step.buttonLabel}
                       </button>
                     </div>
-                    <p style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.6, margin: 0, marginBottom: 4 }}>
-                      {step.plain}
-                    </p>
-                    <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                      Under the hood: {step.techNote}
-                    </p>
-                    {!comingSoon && step.requires && steps[step.requires] !== 'done' && (
-                      <p style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 4, fontWeight: 500 }}>
-                        Requires Step {STEPS.findIndex(s => s.key === step.requires) + 1} to complete first.
+
+                    {/* Body: description + tech note */}
+                    <div style={{ padding: '8px 12px 10px' }}>
+                      <p style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.55, margin: 0, marginBottom: 5 }}>
+                        {step.plain}
                       </p>
-                    )}
+                      <p style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                        {step.techNote}
+                      </p>
+                      {isLocked && step.requires && (
+                        <p style={{ fontSize: 10, color: 'var(--yellow)', marginTop: 5, fontWeight: 600, margin: '5px 0 0' }}>
+                          ⚠ Complete Step {STEPS.findIndex(s => s.key === step.requires) + 1} first
+                        </p>
+                      )}
+                      {step.key === 'seed' && isDone && (
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 500 }}>
+                            ● Live event stream active
+                          </span>
+                          <a href="/admin" target="_blank" rel="noopener" style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600, textDecoration: 'none' }}>
+                            Open Admin →
+                          </a>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -973,6 +1062,136 @@ export default function DemoPage() {
 
         {/* ── Right: Live Details ── */}
         <div className="right-col">
+
+          {/* AI Hotspot Analysis — top priority */}
+          {steps.ai !== 'idle' && (
+            <div className="card">
+              <div className="card-header" style={{ flexWrap: 'nowrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span className="card-title" style={{ whiteSpace: 'nowrap' }}>AI Hotspot Analysis</span>
+                  <div style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
+                    <button
+                      style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--text-muted)', background: 'transparent', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                      onMouseEnter={e => { const t = e.currentTarget.nextElementSibling as HTMLElement; if (t) t.style.display = 'block' }}
+                      onMouseLeave={e => { const t = e.currentTarget.nextElementSibling as HTMLElement; if (t) t.style.display = 'none' }}
+                    >i</button>
+                    <div style={{ display: 'none', position: 'absolute', top: '100%', right: 0, marginTop: 6, background: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: '12px 14px', width: 250, fontSize: 10, color: tooltipText, lineHeight: 1.8, zIndex: 1000, boxShadow: tooltipShadow }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.display = 'none' }}>
+                      <div style={{ fontWeight: 700, fontSize: 10, borderBottom: `1px solid ${tooltipBorder}`, paddingBottom: 7, marginBottom: 9 }}>How to read this card</div>
+                      {[
+                        ['Status', 'Critical / High / Moderate — based on % of unmatched riders'],
+                        ['Unmatched', '% of riders in this zone with no driver assigned yet'],
+                        ['Fare Impact', 'Estimated surge above base fare from the shortage ratio'],
+                        ['Confidence', 'How tightly clustered the requests are — higher = denser hotspot'],
+                        ['Deploy', 'Minimum drivers to send into this zone to clear the backlog'],
+                        ['Nearest', 'Closest idle drivers by GPS — highlighted orange on map'],
+                      ].map(([label, desc]) => (
+                        <div key={label} style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>{label}</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>{desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {steps.ai === 'done' && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: '#16a34a' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', display: 'inline-block', animation: 'blink 1s infinite' }} />
+                      LIVE
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div style={{ padding: '4px 12px 8px', fontSize: 9, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                Peak demand snapshot · updates every 8s while unmatched rides exist
+              </div>
+              <div className="card-body flex-col gap-14">
+                {aiHotspots.length === 0 && steps.ai !== 'idle' && (
+                  <div style={{ textAlign: 'center', padding: '16px 8px' }}>
+                    <div style={{ fontSize: 28, marginBottom: 10 }}>🟢</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+                      No Hotspots Detected
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 10 }}>
+                      DBSCAN found no demand clusters — ride requests are too sparse or spread out for any zone to exceed the threshold.
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', background: 'rgba(0,0,0,0.04)', borderRadius: 6, padding: '8px 10px', textAlign: 'left' }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Why this happens:</div>
+                      <div style={{ marginBottom: 2 }}>· Needs ≥3 requests within 1.5 km of each other</div>
+                      <div style={{ marginBottom: 2 }}>· Light traffic spreads requests too thin</div>
+                      <div>· Try <strong>Dense preset</strong> to see 2–4 hotspot clusters</div>
+                    </div>
+                  </div>
+                )}
+                {aiHotspots.map((hotspot, idx) => (
+                  <div key={idx} style={{ padding: '10px', borderRadius: 6, background: 'rgba(220,38,38,0.03)', border: '1px solid rgba(220,38,38,0.1)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{hotspot.zone_name}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: hotspotStatusColor(hotspot.zone_status), background: `${hotspotStatusColor(hotspot.zone_status)}18`, padding: '2px 7px', borderRadius: 4, border: `1px solid ${hotspotStatusColor(hotspot.zone_status)}44` }}>
+                        {hotspot.zone_status.toUpperCase()}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
+                      {hotspot.shortage > 0
+                        ? `${hotspot.unmatched_pct}% of riders unmatched — ${hotspot.shortage} of ${hotspot.demand} requests have no driver.`
+                        : 'Supply meets demand. No action required.'}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+                      {[
+                        { label: 'Riders waiting', value: String(hotspot.demand), accent: 'var(--red)' },
+                        { label: 'Idle drivers', value: String(hotspot.drivers_nearby), accent: 'var(--green)' },
+                        { label: 'Unmatched', value: `${hotspot.unmatched_pct}%`, accent: 'var(--orange)' },
+                        { label: 'Cluster confidence', value: `${(hotspot.confidence * 100).toFixed(0)}%`, accent: 'var(--yellow)' },
+                      ].map(({ label, value, accent }) => (
+                        <div key={label} style={{ background: 'rgba(0,0,0,0.025)', padding: '5px 8px', borderRadius: 4, borderLeft: `2px solid ${accent}` }}>
+                          <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{label}</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {hotspot.fare_increase_pct > 0 && (
+                      <div style={{ background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.2)', borderRadius: 4, padding: '7px 10px', marginBottom: 10 }}>
+                        <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Fare Impact Estimate</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--orange)' }}>Fares ~{hotspot.fare_increase_pct}% above baseline ({hotspot.surge_multiplier}x surge)</div>
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>Based on {hotspot.unmatched_pct}% demand-supply gap in this cluster</div>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6, marginBottom: hotspot.nearest_drivers.length > 0 ? 10 : 0 }}>
+                      <div style={{ flex: 1, background: 'rgba(34,197,94,0.08)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                        <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase' }}>Deploy</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)' }}>+{hotspot.deploy_recommendation}</div>
+                      </div>
+                      <div style={{ flex: 1, background: 'rgba(59,130,246,0.08)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                        <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase' }}>Resolves in</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--blue)' }}>{hotspot.eta_minutes} min</div>
+                      </div>
+                    </div>
+                    {hotspot.nearest_drivers.length > 0 && (
+                      <div style={{ borderTop: '1px solid rgba(220,38,38,0.1)', paddingTop: 8 }}>
+                        <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 6 }}>
+                          {hotspot.nearest_drivers.every(d => d.status === 'available') ? 'Nearest idle drivers — highlighted on map' : 'Nearest drivers (all busy — none idle)'}
+                        </div>
+                        {hotspot.nearest_drivers.map((d, i) => {
+                          const isAvailable = d.status === 'available'
+                          return (
+                            <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: i < hotspot.nearest_drivers.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: isAvailable ? '#f97316' : '#64748b', display: 'inline-block', flexShrink: 0 }} />
+                                <span style={{ fontSize: 10, fontWeight: 600, color: isAvailable ? 'var(--text)' : 'var(--text-muted)' }}>{d.name}</span>
+                                {!isAvailable && <span style={{ fontSize: 8, color: 'var(--text-muted)', fontStyle: 'italic' }}>({d.status?.replace('_', ' ')})</span>}
+                              </div>
+                              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{d.distance_km} km</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Current Scenario */}
           <div className="card">
@@ -1003,11 +1222,166 @@ export default function DemoPage() {
                 <span className="info-label">Search radius</span>
                 <span className="info-value">{meta.radius}</span>
               </div>
-              <div className="surge-banner" style={{ marginTop: 8, marginBottom: 0 }}>
+              <div className="surge-banner" style={{ marginTop: 8, marginBottom: 8 }}>
                 {meta.shows}
+              </div>
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>
+                  Demo Scale Reference
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 9, color: 'var(--text-muted)' }}>
+                  <span>⏱ 1 sec ≈ 1 min travel</span>
+                  <span>📍 Location update: 2s</span>
+                  <span>🔍 Search: 3 km → 5 km</span>
+                  <span>🤖 DBSCAN eps: 1.5 km</span>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* AI Hotspot Analysis — moved to top, see above right-col opening */}
+          {false && (
+              <div className="card">
+                <div className="card-header" style={{ flexWrap: 'nowrap', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span className="card-title" style={{ whiteSpace: 'nowrap' }}>AI Hotspot Analysis</span>
+                    <div style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
+                      <button
+                        style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--text-muted)', background: 'transparent', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                        onMouseEnter={e => { const t = e.currentTarget.nextElementSibling as HTMLElement; if (t) t.style.display = 'block' }}
+                        onMouseLeave={e => { const t = e.currentTarget.nextElementSibling as HTMLElement; if (t) t.style.display = 'none' }}
+                      >i</button>
+                      <div style={{ display: 'none', position: 'absolute', top: '100%', right: 0, marginTop: 6, background: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: '12px 14px', width: 250, fontSize: 10, color: tooltipText, lineHeight: 1.8, zIndex: 1000, boxShadow: tooltipShadow }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.display = 'none' }}>
+                        <div style={{ fontWeight: 700, fontSize: 10, borderBottom: `1px solid ${tooltipBorder}`, paddingBottom: 7, marginBottom: 9, letterSpacing: '0.3px' }}>How to read this card</div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>Status</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>Critical / High / Moderate based on % of unmatched riders</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>Unmatched</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>% of riders in this zone with no driver assigned yet</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>Fare Impact</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>Estimated surge above base fare from the shortage ratio</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>Confidence</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>How tightly clustered the requests are — higher = denser hotspot</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>Deploy</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>Minimum drivers to send into this zone to clear the backlog</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 70 }}>Nearest</span>
+                          <span style={{ color: tooltipText, opacity: 0.75 }}>Closest idle drivers by GPS — highlighted orange on map</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    {steps.ai === 'done' && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: '#16a34a' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', display: 'inline-block', animation: 'blink 1s infinite' }} />
+                        LIVE
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ padding: '4px 12px 8px', fontSize: 9, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                  Peak demand snapshot · updates every 8s while unmatched rides exist
+                </div>
+                <div className="card-body flex-col gap-14">
+                  {aiHotspots.map((hotspot, idx) => (
+                    <div key={idx} style={{ padding: '10px', borderRadius: 6, background: 'rgba(220,38,38,0.03)', border: '1px solid rgba(220,38,38,0.1)' }}>
+
+                      {/* Zone name + status badge */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{hotspot.zone_name}</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: hotspotStatusColor(hotspot.zone_status), background: `${hotspotStatusColor(hotspot.zone_status)}18`, padding: '2px 7px', borderRadius: 4, border: `1px solid ${hotspotStatusColor(hotspot.zone_status)}44` }}>
+                          {hotspot.zone_status.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {/* Human-readable summary */}
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
+                        {hotspot.shortage > 0
+                          ? `${hotspot.unmatched_pct}% of riders unmatched — ${hotspot.shortage} of ${hotspot.demand} requests have no driver.`
+                          : 'Supply meets demand. No action required.'}
+                      </div>
+
+                      {/* Key metrics row */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+                        {[
+                          { label: 'Riders waiting', value: String(hotspot.demand), accent: 'var(--red)' },
+                          { label: 'Idle drivers', value: String(hotspot.drivers_nearby), accent: 'var(--green)' },
+                          { label: 'Unmatched', value: `${hotspot.unmatched_pct}%`, accent: 'var(--orange)' },
+                          { label: 'Cluster confidence', value: `${(hotspot.confidence * 100).toFixed(0)}%`, accent: 'var(--yellow)' },
+                        ].map(({ label, value, accent }) => (
+                          <div key={label} style={{ background: 'rgba(0,0,0,0.025)', padding: '5px 8px', borderRadius: 4, borderLeft: `2px solid ${accent}` }}>
+                            <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{label}</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Fare impact analysis */}
+                      {hotspot.fare_increase_pct > 0 && (
+                        <div style={{ background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.2)', borderRadius: 4, padding: '7px 10px', marginBottom: 10 }}>
+                          <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Fare Impact Estimate</div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--orange)' }}>
+                            Fares ~{hotspot.fare_increase_pct}% above baseline ({hotspot.surge_multiplier}x surge)
+                          </div>
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                            Based on {hotspot.unmatched_pct}% demand-supply gap in this cluster
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action row */}
+                      <div style={{ display: 'flex', gap: 6, marginBottom: hotspot.nearest_drivers.length > 0 ? 10 : 0 }}>
+                        <div style={{ flex: 1, background: 'rgba(34,197,94,0.08)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                          <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase' }}>Deploy</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)' }}>+{hotspot.deploy_recommendation}</div>
+                        </div>
+                        <div style={{ flex: 1, background: 'rgba(59,130,246,0.08)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                          <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase' }}>Resolves in</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--blue)' }}>{hotspot.eta_minutes} min</div>
+                        </div>
+                      </div>
+
+                      {/* Nearest drivers */}
+                      {hotspot.nearest_drivers.length > 0 && (
+                        <div style={{ borderTop: '1px solid rgba(220,38,38,0.1)', paddingTop: 8 }}>
+                          <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 6 }}>
+                            {hotspot.nearest_drivers.every(d => d.status === 'available')
+                              ? 'Nearest idle drivers — highlighted on map'
+                              : 'Nearest drivers (all busy — none idle)'}
+                          </div>
+                          {hotspot.nearest_drivers.map((d, i) => {
+                            const isAvailable = d.status === 'available'
+                            const dotColor = isAvailable ? '#f97316' : '#64748b'
+                            const statusLabel = isAvailable ? null : d.status?.replace('_', ' ')
+                            return (
+                              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: i < hotspot.nearest_drivers.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor, display: 'inline-block', flexShrink: 0 }} />
+                                  <span style={{ fontSize: 10, fontWeight: 600, color: isAvailable ? 'var(--text)' : 'var(--text-muted)' }}>{d.name}</span>
+                                  {statusLabel && <span style={{ fontSize: 8, color: 'var(--text-muted)', fontStyle: 'italic' }}>({statusLabel})</span>}
+                                </div>
+                                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{d.distance_km} km</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+          )}
 
           {/* Dispatch Results — live tally shown after Step 3 fires */}
           {steps.requests !== 'idle' ? (
@@ -1015,121 +1389,104 @@ export default function DemoPage() {
               <div className="card-header">
                 <span className="card-title">Dispatch Snapshot</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>click any card for details</span>
-                  <span className="badge badge-gray" style={{ fontSize: 10 }}>LIVE</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>refreshed {metricsFreshAt}</span>
+                  <span className="badge badge-gray" style={{ fontSize: 9 }}>LIVE</span>
                 </span>
               </div>
-              <div className="card-body flex-col gap-12">
-                <p className="text-muted" style={{ fontSize: 11, marginTop: -4 }}>
-                  Synced from backend metrics · refreshed {metricsFreshAt}
-                </p>
-                <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-                  <div
-                    className="metric-card"
-                    style={{ cursor: 'pointer' }}
-                    title="Click for details"
-                    onClick={() => {
-                      const items: MetricItem[] = recentMatches
-                        .filter(m => !m.at.startsWith('✓'))
-                        .map(m => ({
-                          id: m.rideId,
-                          label: m.rideId.slice(0, 8) + '…',
-                          detail: `${m.driverName} · ${m.radiusKm} km · try ${m.attempt ?? 1}`,
-                          color: 'var(--green)',
-                        }))
-                      setDetailModal({ type: 'assigned', count: assignedNow, items: items.length > 0 ? items : undefined })
-                    }}
-                  >
-                    <div className="metric-value" style={{ color: 'var(--green)', fontSize: 24 }}>{assignedNow}</div>
-                    <div className="metric-label">ASSIGNED</div>
-                    <div className="metric-sub">
-                      driver matched / en route / on trip
-                      {(arrivingNow > 0 || onTripNow > 0) && (
-                        <span style={{ display: 'block', marginTop: 2 }}>
-                          {arrivingNow > 0 && <span style={{ color: 'var(--blue)' }}>{arrivingNow} arriving </span>}
-                          {onTripNow > 0 && <span style={{ color: 'var(--green)' }}>{onTripNow} on trip</span>}
-                        </span>
-                      )}
+              <div className="card-body flex-col gap-10">
+
+                {/* Success rate bar */}
+                {dsTotal > 0 && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text)' }}>Success Rate</span>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: dsSuccessRate >= 70 ? 'var(--green)' : dsSuccessRate >= 50 ? 'var(--yellow)' : 'var(--red)' }}>
+                        {dsSuccessRate}%
+                      </span>
+                    </div>
+                    <div style={{ height: 6, borderRadius: 4, background: 'rgba(220,38,38,0.2)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${dsSuccessRate}%`, borderRadius: 4, background: dsSuccessRate >= 70 ? 'var(--green)' : dsSuccessRate >= 50 ? 'var(--yellow)' : 'var(--red)', transition: 'width 0.4s ease' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: 9, color: 'var(--text-muted)' }}>
+                      <span>{completedNow} completed · {cancelledNow} failed</span>
+                      <span>{dsTotal} total</span>
                     </div>
                   </div>
-                  <div
-                    className="metric-card"
-                    style={{ cursor: 'pointer' }}
-                    title="Click for details"
-                    onClick={() => {
-                      const reqCount = metrics.by_status.requested ?? 0
-                      const srchCount = metrics.by_status.searching_driver ?? 0
-                      const items: MetricItem[] = [
-                        ...(reqCount > 0 ? [{ id: 'req', label: 'Requested (queued)', detail: String(reqCount), color: 'var(--yellow)' }] : []),
-                        ...(srchCount > 0 ? [{ id: 'srch', label: 'Searching driver', detail: String(srchCount), color: 'var(--yellow)' }] : []),
-                      ]
-                      setDetailModal({ type: 'searching', count: searchingNow, items: items.length > 0 ? items : undefined })
-                    }}
-                  >
-                    <div className="metric-value" style={{ color: 'var(--yellow)', fontSize: 24 }}>{searchingNow}</div>
-                    <div className="metric-label">SEARCHING</div>
-                    <div className="metric-sub">waiting for available driver</div>
+                )}
+
+                {/* 4 status tiles */}
+                <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                  <div className="metric-card" style={{ cursor: 'pointer', padding: '8px 10px' }} title="Click for details"
+                    onClick={() => setDetailModal({ type: 'assigned', count: assignedNow })}>
+                    <div className="metric-value" style={{ color: 'var(--green)', fontSize: 22 }}>{assignedNow}</div>
+                    <div className="metric-label" style={{ fontSize: 9 }}>ASSIGNED</div>
+                    <div className="metric-sub" style={{ fontSize: 9 }}>
+                      {arrivingNow > 0 && <span style={{ color: 'var(--blue)' }}>{arrivingNow} arriving </span>}
+                      {onTripNow > 0 && <span style={{ color: 'var(--green)' }}>{onTripNow} on trip</span>}
+                      {arrivingNow === 0 && onTripNow === 0 && 'en route / on trip'}
+                    </div>
                   </div>
-                  <div
-                    className="metric-card"
-                    style={{ cursor: 'pointer' }}
-                    title="Click for details"
+                  <div className="metric-card" style={{ cursor: 'pointer', padding: '8px 10px' }} title="Click for details"
+                    onClick={() => setDetailModal({ type: 'searching', count: searchingNow })}>
+                    <div className="metric-value" style={{ color: 'var(--yellow)', fontSize: 22 }}>{searchingNow}</div>
+                    <div className="metric-label" style={{ fontSize: 9 }}>SEARCHING</div>
+                    <div className="metric-sub" style={{ fontSize: 9 }}>awaiting driver</div>
+                  </div>
+                  <div className="metric-card" style={{ cursor: 'pointer', padding: '8px 10px' }} title="Click for details"
                     onClick={() => {
-                      const items: MetricItem[] = cancelledRideLog.map(c => ({
-                        id: c.rideId,
-                        label: c.rideId.slice(0, 8) + '…',
-                        detail: `at ${c.at}`,
-                        color: '#ef4444',
-                      }))
+                      const items: MetricItem[] = cancelledRideLog.map(c => ({ id: c.rideId, label: c.rideId.slice(0, 8) + '…', detail: `at ${c.at}`, color: '#ef4444' }))
                       setDetailModal({ type: 'cancelled', count: cancelledNow, items: items.length > 0 ? items : undefined })
-                    }}
-                  >
-                    <div className="metric-value" style={{ color: 'var(--red)', fontSize: 24 }}>{cancelledNow}</div>
-                    <div className="metric-label">CANCELLED</div>
-                    <div className="metric-sub">no driver available / user cancelled</div>
+                    }}>
+                    <div className="metric-value" style={{ color: 'var(--red)', fontSize: 22 }}>{cancelledNow}</div>
+                    <div className="metric-label" style={{ fontSize: 9 }}>FAILED</div>
+                    <div className="metric-sub" style={{ fontSize: 9 }}>no driver in 5 km</div>
                   </div>
-                  <div
-                    className="metric-card"
-                    style={{ cursor: 'pointer' }}
-                    title="Click for details"
-                    onClick={() => {
-                      const items: MetricItem[] = recentMatches
-                        .filter(m => m.at.startsWith('✓'))
-                        .map(m => ({
-                          id: m.rideId,
-                          label: m.rideId.slice(0, 8) + '…',
-                          detail: `${m.driverName} · ${m.at}`,
-                          color: '#2563eb',
-                        }))
-                      setDetailModal({ type: 'completed', count: completedNow, items: items.length > 0 ? items : undefined })
-                    }}
-                  >
-                    <div className="metric-value" style={{ color: 'var(--blue)', fontSize: 24 }}>{completedNow}</div>
-                    <div className="metric-label">COMPLETED</div>
-                    <div className="metric-sub">rides finished successfully</div>
+                  <div className="metric-card" style={{ cursor: 'pointer', padding: '8px 10px' }} title="Click for details"
+                    onClick={() => setDetailModal({ type: 'completed', count: completedNow })}>
+                    <div className="metric-value" style={{ color: 'var(--blue)', fontSize: 22 }}>{completedNow}</div>
+                    <div className="metric-label" style={{ fontSize: 9 }}>COMPLETED</div>
+                    <div className="metric-sub" style={{ fontSize: 9 }}>trips finished</div>
                   </div>
                 </div>
 
+                {/* Insights row */}
+                {dsAttempts.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                    <div style={{ background: 'rgba(0,0,0,0.03)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                      <div style={{ fontSize: 7, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 2 }}>Avg Retries</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{dsAvgRetries}</div>
+                    </div>
+                    <div style={{ background: 'rgba(0,0,0,0.03)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                      <div style={{ fontSize: 7, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 2 }}>Max Retries</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: dsMaxRetries >= 5 ? 'var(--orange)' : 'var(--text)' }}>{dsMaxRetries}</div>
+                    </div>
+                    {dsAvgFare && (
+                      <div style={{ background: 'rgba(0,0,0,0.03)', padding: '6px 8px', borderRadius: 4, textAlign: 'center' }}>
+                        <div style={{ fontSize: 7, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 2 }}>Avg Fare</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>₹{dsAvgFare}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Recent matches */}
                 {recentMatches.length > 0 ? (
                   <div>
-                    <div className="section-label" style={{ marginBottom: 6 }}>Recent Matches</div>
+                    <div className="section-label" style={{ marginBottom: 6, fontSize: 9 }}>Recent Matches</div>
                     {recentMatches.slice(0, 8).map((m, i) => (
-                      <div key={i} className="info-row" style={{ alignItems: 'flex-start' }}>
-                        <span className="info-label" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>
-                          {m.rideId.slice(0, 8)}…
-                        </span>
-                        <span className="info-value" style={{ fontSize: 11, textAlign: 'right' }}>
-                          <strong>{m.driverName}</strong>
-                          {' · '}{m.radiusKm} km
-                          {' · '}try {m.attempt ?? 1}
-                          {' · '}{m.at}
-                        </span>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: i < Math.min(recentMatches.length, 8) - 1 ? '1px solid var(--border)' : 'none', fontSize: 10 }}>
+                        <span style={{ color: 'var(--text)', fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.driverName}</span>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{m.radiusKm} km</span>
+                          <span style={{ fontSize: 9, color: (m.attempt ?? 1) >= 5 ? 'var(--orange)' : 'var(--text-muted)' }}>try {m.attempt ?? 1}</span>
+                          <span style={{ fontSize: 9, color: m.at.startsWith('✓') ? 'var(--green)' : 'var(--text-muted)', fontWeight: 600 }}>{m.at}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-muted" style={{ fontSize: 12 }}>
-                    Matches will appear here as soon as assignments are confirmed.
+                  <p className="text-muted" style={{ fontSize: 11 }}>
+                    Matches will appear here as assignments are confirmed.
                   </p>
                 )}
               </div>

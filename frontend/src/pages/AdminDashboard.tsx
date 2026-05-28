@@ -155,6 +155,7 @@ export default function AdminDashboard() {
     logEntry('system', 'Welcome to the Admin Dashboard. Connecting to the live metrics stream...'),
   ])
   const [showExplainModal, setShowExplainModal] = useState(false)
+  const [aiHotspots, setAiHotspots] = useState<import('../api/client').AiHotspot[]>([])
   const metricsRef = useRef(metrics)
   metricsRef.current = metrics
 
@@ -226,6 +227,7 @@ export default function AdminDashboard() {
       setMetrics(EMPTY_METRICS)
       setRideActivity([])
       setLastRefresh('—')
+      setAiHotspots([])
       addLog(logEntry('event', 'All data cleared — system is back to a clean state. Safe to demo again.'))
     } catch {
       addLog(logEntry('error', 'Clear failed. Is the backend running on port 8000?'))
@@ -376,11 +378,15 @@ export default function AdminDashboard() {
           `Surge pricing active in ${data.zone} — ${data.multiplier}x multiplier.`,
           `demand/supply ratio exceeded threshold · zone: ${data.zone}`,
         ))
-      } else if (event === 'ai_hotspot') {
-        addLog(logEntry('system',
-          `AI demand hotspot — ${data.demand} requests, ${data.drivers} drivers nearby.`,
-          `zone: ${data.zone} · DBSCAN cluster · Phase 5`,
-        ))
+      } else if (event === 'ai_cycle_update') {
+        const incoming = (data.hotspots as import('../api/client').AiHotspot[]) || []
+        setAiHotspots(incoming)
+        if (incoming.length > 0) {
+          addLog(logEntry('system',
+            `AI update: ${incoming.length} demand hotspot(s)`,
+            incoming.map((h: import('../api/client').AiHotspot) => `${h.zone_name} — ${h.shortage} shortage`).join(' | '),
+          ))
+        }
       } else if (event === 'metrics_update') {
         if (data.drivers && data.rides) {
           setMetrics(data as unknown as SystemMetrics)
@@ -415,6 +421,11 @@ export default function AdminDashboard() {
   }, [wsStatus, toast])
 
   const { drivers, rides } = metrics
+
+  const adminStatusColor = (s: string) =>
+    s === 'Critical' ? 'var(--red)' : s === 'High' ? 'var(--orange)' : s === 'Moderate' ? 'var(--yellow)' : 'var(--green)'
+  const adminTotalShortage = aiHotspots.reduce((s, h) => s + h.shortage, 0)
+  const adminTotalDeploy = aiHotspots.reduce((s, h) => s + h.deploy_recommendation, 0)
 
   return (
     <div className="app-shell">
@@ -548,6 +559,138 @@ export default function AdminDashboard() {
 
         {/* ── Right Column ── */}
         <div className="right-col">
+
+          {/* AI Operations */}
+          {aiHotspots.length > 0 && (
+              <div className="card">
+                <div className="card-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="card-title">AI Operations</span>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <button
+                        style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--text-muted)', background: 'transparent', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                        onMouseEnter={e => { const t = e.currentTarget.nextElementSibling as HTMLElement; if (t) t.style.display = 'block' }}
+                        onMouseLeave={e => { const t = e.currentTarget.nextElementSibling as HTMLElement; if (t) t.style.display = 'none' }}
+                      >i</button>
+                      <div style={{ display: 'none', position: 'absolute', top: '100%', left: 0, marginTop: 6, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', width: 260, fontSize: 10, color: 'var(--text)', lineHeight: 1.8, zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.display = 'none' }}>
+                        <div style={{ fontWeight: 700, fontSize: 10, borderBottom: '1px solid var(--border)', paddingBottom: 7, marginBottom: 9 }}>About AI Operations</div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80 }}>Hotspot</span>
+                          <span style={{ color: 'var(--text-muted)' }}>A zone detected by DBSCAN where active ride requests form a dense cluster</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80 }}>Status</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Critical ≥60% unmatched · High ≥30% · Moderate ≥10%</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80 }}>Surge</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Recommended fare multiplier based on shortage ratio in that zone</span>
+                        </div>
+                        <div style={{ marginBottom: 5, display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80 }}>Dispatch</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Number of idle drivers to redirect into the zone immediately</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80 }}>Candidates</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Nearest idle drivers by GPS — ranked by ST_Distance from hotspot center</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="badge badge-red" style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700 }}>
+                    {aiHotspots.length} HOTSPOT{aiHotspots.length !== 1 ? 'S' : ''}
+                  </span>
+                </div>
+                <div className="card-body flex-col gap-12">
+                  {/* Fleet-level summary */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div style={{ background: 'rgba(220,38,38,0.06)', padding: '8px', borderRadius: 4, borderLeft: '3px solid var(--red)' }}>
+                      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Unmatched Riders</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--red)', lineHeight: 1 }}>{adminTotalShortage}</div>
+                    </div>
+                    <div style={{ background: 'rgba(34,197,94,0.06)', padding: '8px', borderRadius: 4, borderLeft: '3px solid var(--green)' }}>
+                      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Drivers Needed</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--green)', lineHeight: 1 }}>+{adminTotalDeploy}</div>
+                    </div>
+                  </div>
+
+                  {aiHotspots.map((h, idx) => (
+                    <div key={idx} style={{ padding: '10px', borderRadius: 6, background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.08)' }}>
+                      {/* Zone + status */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{h.zone_name}</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: adminStatusColor(h.zone_status), background: `${adminStatusColor(h.zone_status)}18`, padding: '2px 6px', borderRadius: 4 }}>
+                          {h.zone_status.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {/* Summary sentence */}
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 9 }}>
+                        {h.shortage > 0
+                          ? `${h.unmatched_pct}% of requests unmatched. Fares est. +${h.fare_increase_pct}% above baseline.`
+                          : 'Supply meets demand in this zone.'}
+                      </div>
+
+                      {/* Compact metrics */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 9, fontSize: 9 }}>
+                        {[
+                          { l: 'Demand', v: String(h.demand), c: 'var(--red)' },
+                          { l: 'Supply', v: String(h.drivers_nearby), c: 'var(--green)' },
+                          { l: 'Confidence', v: `${(h.confidence * 100).toFixed(0)}%`, c: 'var(--yellow)' },
+                        ].map(({ l, v, c }) => (
+                          <div key={l} style={{ textAlign: 'center', background: 'rgba(0,0,0,0.03)', padding: '5px', borderRadius: 4 }}>
+                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase' }}>{l}</div>
+                            <div style={{ fontWeight: 700, color: c }}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Operational actions */}
+                      <div style={{ borderTop: '1px solid rgba(0,0,0,0.07)', paddingTop: 8, marginBottom: h.nearest_drivers.length > 0 ? 8 : 0 }}>
+                        <div style={{ fontSize: 7, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Recommended Actions</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, fontSize: 9 }}>
+                          <div style={{ background: 'rgba(34,197,94,0.08)', padding: '6px', borderRadius: 4, textAlign: 'center' }}>
+                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2 }}>DISPATCH</div>
+                            <div style={{ fontWeight: 800, color: 'var(--green)', fontSize: 12 }}>+{h.deploy_recommendation}</div>
+                          </div>
+                          <div style={{ background: 'rgba(249,115,22,0.08)', padding: '6px', borderRadius: 4, textAlign: 'center' }}>
+                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2 }}>SURGE</div>
+                            <div style={{ fontWeight: 800, color: 'var(--orange)', fontSize: 12 }}>{h.surge_multiplier}x</div>
+                          </div>
+                          <div style={{ background: 'rgba(59,130,246,0.08)', padding: '6px', borderRadius: 4, textAlign: 'center' }}>
+                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2 }}>ETA</div>
+                            <div style={{ fontWeight: 800, color: 'var(--blue)', fontSize: 12 }}>{h.eta_minutes}m</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Reposition candidates */}
+                      {h.nearest_drivers.length > 0 && (
+                        <div style={{ borderTop: '1px solid rgba(0,0,0,0.07)', paddingTop: 8 }}>
+                          <div style={{ fontSize: 7, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>
+                            {h.nearest_drivers.every(d => d.status === 'available') ? 'Reposition Candidates' : 'Nearest Drivers (all busy)'}
+                          </div>
+                          {h.nearest_drivers.map((d, i) => {
+                            const isAvailable = d.status === 'available'
+                            return (
+                              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: i < h.nearest_drivers.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: isAvailable ? '#f97316' : '#64748b', display: 'inline-block' }} />
+                                  <span style={{ fontSize: 10, fontWeight: 600, color: isAvailable ? 'var(--text)' : 'var(--text-muted)' }}>{d.name}</span>
+                                  {!isAvailable && <span style={{ fontSize: 8, color: 'var(--text-muted)', fontStyle: 'italic' }}>({d.status?.replace('_', ' ')})</span>}
+                                </div>
+                                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{d.distance_km} km</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+          )}
 
           {Object.keys(metrics.by_status).length > 0 && (
             <div className="card">

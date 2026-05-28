@@ -8,6 +8,21 @@
   100% { transform: scale(1.7); opacity: 0; }
 }
 
+/* Reposition driver — blink orange */
+@keyframes reposition-blink {
+  0%, 100% { opacity: 1; }
+  45%       { opacity: 0.15; }
+}
+.driver-reposition { animation: reposition-blink 0.9s ease-in-out infinite; }
+
+/* Hotspot circle — opacity pulse (Leaflet sets fill/stroke-opacity inline so we use opacity) */
+@keyframes hotspot-radial {
+  0%, 100% { opacity: 0.9; }
+  50%       { opacity: 0.3; }
+}
+.hotspot-glow       { animation: hotspot-radial 2s ease-in-out infinite; }
+.hotspot-glow-outer { animation: hotspot-radial 2s ease-in-out infinite 0.6s; }
+
 @keyframes search-pulse {
   0%, 100% { opacity: 0.45; }
   50%       { opacity: 1; }

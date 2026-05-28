@@ -43,4 +43,6 @@ app.include_router(metrics_router)
 
 if getattr(settings, "demo_mode", False):
     from app.api.demo import router as demo_router
+    from app.api.ai import router as ai_router
     app.include_router(demo_router)
+    app.include_router(ai_router)

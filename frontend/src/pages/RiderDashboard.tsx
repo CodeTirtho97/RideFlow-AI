@@ -13,11 +13,12 @@ import { DispatchMap, fetchRoute } from '../components/DispatchMap'
 import type { MapDriver, MapTrip, MapAnimEvent, LegendItem } from '../components/DispatchMap'
 
 const RIDER_LEGEND: LegendItem[] = [
-  { label: 'Your location',   color: '#f59e0b', shape: 'ring' },
-  { label: 'Destination',     color: '#dc2626', shape: 'pin'  },
-  { label: 'Available driver',color: '#16a34a', shape: 'dot'  },
-  { label: 'Driver en route',     color: '#ea580c', shape: 'dot'  },
-  { label: 'Assigned / On trip',  color: '#2563eb', shape: 'dot'  },
+  { label: 'You (pickup)',     color: '#f59e0b', shape: 'ring' },
+  { label: 'Destination',      color: '#dc2626', shape: 'pin'  },
+  { label: 'Available driver', color: '#16a34a', shape: 'dot'  },
+  { label: 'Assigned',         color: '#d97706', shape: 'dot'  },
+  { label: 'Driver arriving',  color: '#ea580c', shape: 'dot'  },
+  { label: 'On trip',          color: '#2563eb', shape: 'dot'  },
 ]
 
 // 30 Bengaluru locations — same pool used by the Driver page
@@ -511,7 +512,7 @@ export default function RiderDashboard() {
           driverId:   assignedDriverId,
           fromLat:    from[0], fromLng: from[1],
           toLat:      to[0],   toLng:   to[1],
-          durationMs: 14000,
+          durationMs: 12000,
           path,
         }])
       })
@@ -529,7 +530,7 @@ export default function RiderDashboard() {
           driverId:   assignedDriverId,
           fromLat:    pLat, fromLng: pLng,
           toLat:      dLat, toLng:   dLng,
-          durationMs: 18000,
+          durationMs: 16000,
           path,
         }])
       })

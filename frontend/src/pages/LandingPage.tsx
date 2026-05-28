@@ -85,6 +85,15 @@ const FEATURES = [
   },
 ]
 
+const AI_FEATURE = {
+  icon: '🤖',
+  bg: '#fce7f3',
+  accent: '#db2777',
+  title: 'AI Demand Detection',
+  plain: 'DBSCAN clustering identifies demand hotspots in real time — zones where riders outnumber idle drivers — and recommends exactly which nearby idle drivers to reposition. Outputs zone status, surge multiplier, deploy count, and ETA to resolve.',
+  tech: 'scikit-learn DBSCAN · PostGIS ST_Distance · Redis Pub/Sub alerts · confidence scoring from cluster tightness',
+}
+
 const INTERVIEW_QA = [
   {
     q: 'How do you find the nearest driver?',
@@ -212,9 +221,17 @@ export default function LandingPage() {
             <div style={{ fontSize: 20, fontWeight: 700, color: 'white', marginBottom: 8 }}>
               Playground — Start Here
             </div>
-            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.75)', lineHeight: 1.6, maxWidth: 480 }}>
+            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.75)', lineHeight: 1.6, maxWidth: 520, marginBottom: 14 }}>
               Seed a city with drivers, fire multiple ride requests at once, and watch the dispatch
-              engine handle them in parallel. Choose Light, Moderate, or Dense traffic scenarios.
+              engine handle them in parallel. Then run AI analysis to detect demand hotspots and
+              get reposition recommendations for idle drivers — all in one flow.
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {['Step 1: Seed Drivers', 'Step 2: Simulate Movement', 'Step 3: Fire Requests', 'Step 4: AI Hotspot Detection'].map((s, i) => (
+                <span key={s} style={{ fontSize: 11, fontWeight: 600, background: i === 3 ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.12)', color: i === 3 ? '#fca5a5' : 'rgba(255,255,255,0.85)', padding: '3px 10px', borderRadius: 20, border: i === 3 ? '1px solid rgba(239,68,68,0.4)' : '1px solid rgba(255,255,255,0.15)' }}>
+                  {s}
+                </span>
+              ))}
             </div>
           </div>
           <span className="playground-feature-cta">Open Playground →</span>
@@ -244,8 +261,8 @@ export default function LandingPage() {
             <span className="dash-card-icon">📊</span>
             <div className="dash-card-title">Admin Dashboard</div>
             <div className="dash-card-desc">
-              A live ops view — active rides, driver pool status, surge zones, and AI demand alerts —
-              all streaming from the same backend in real time.
+              Live ops view — active rides, driver pool status, surge zones, and AI demand alerts
+              with reposition candidates. Run the Playground first, then watch it populate here in real time.
             </div>
             <div className="dash-card-link">Open Admin View →</div>
           </Link>
@@ -268,6 +285,26 @@ export default function LandingPage() {
                 <div className="feature-tech">{f.tech}</div>
               </div>
             ))}
+          </div>
+
+          {/* AI Feature — full width, visually distinct */}
+          <div
+            className="feature-card"
+            style={{
+              borderTop: `3px solid ${AI_FEATURE.accent}`,
+              marginTop: 16,
+              display: 'grid',
+              gridTemplateColumns: '48px 1fr',
+              gap: '0 16px',
+              alignItems: 'start',
+            }}
+          >
+            <div className="feature-icon" style={{ background: AI_FEATURE.bg, gridRow: '1 / 3' }}>{AI_FEATURE.icon}</div>
+            <div>
+              <div className="feature-title" style={{ marginBottom: 4 }}>{AI_FEATURE.title}</div>
+              <div className="feature-plain" style={{ marginBottom: 6 }}>{AI_FEATURE.plain}</div>
+              <div className="feature-tech">{AI_FEATURE.tech}</div>
+            </div>
           </div>
         </div>
       </div>

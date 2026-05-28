@@ -164,8 +164,31 @@ export const demoRequests = (preset: string) =>
     rides: RideSummary[]
   }>('/requests', { preset })
 
+export interface AiHotspot {
+  center_lat: number
+  center_lng: number
+  zone_name: string
+  zone_status: string
+  demand: number
+  drivers_nearby: number
+  shortage: number
+  unmatched_pct: number
+  confidence: number
+  radius_km: number
+  fare_increase_pct: number
+  surge_multiplier: number
+  deploy_recommendation: number
+  eta_minutes: number
+  nearest_drivers: Array<{ id: string; name: string; distance_km: number; status?: string }>
+}
+
 export const demoAiRun = () =>
-  demoHttp.post<{ status: string; message: string }>('/ai/run')
+  demoHttp.post<{
+    status: string
+    hotspots_found: number
+    hotspots: AiHotspot[]
+    message: string
+  }>('/ai/run')
 
 export const demoReset = () =>
   demoHttp.post<{ status: string; message: string }>('/reset')
