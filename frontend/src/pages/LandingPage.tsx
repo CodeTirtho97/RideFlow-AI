@@ -126,27 +126,43 @@ export default function LandingPage() {
       <div className="landing-hero">
         <div className="hero-dot-overlay" />
         <div className="hero-content">
-          <p className="hero-eyebrow">System Design Portfolio Project</p>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 0 }}>
+            <p className="hero-eyebrow">⬡ System Design Portfolio Project</p>
+          </div>
           <h1 className="hero-title">RideFlow AI</h1>
           <p className="hero-sub">
             A production-grade ride dispatch system built from scratch —
             demonstrating the backend engineering behind apps like Uber and Ola.
           </p>
-          <div className="hero-metric-row">
-            <span className="hero-metric-chip">⚡ &lt;100ms dispatch</span>
-            <span className="hero-metric-chip">🔁 7-state lifecycle</span>
-            <span className="hero-metric-chip">📡 WebSocket fan-out</span>
-            <span className="hero-metric-chip">🤖 AI hotspot detection</span>
+          <div className="hero-stat-grid">
+            <div className="hero-stat-card">
+              <span className="hero-stat-icon" style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>⚡</span>
+              <div className="hero-stat-value">&lt;100ms</div>
+              <div className="hero-stat-label">Dispatch Latency</div>
+            </div>
+            <div className="hero-stat-card">
+              <span className="hero-stat-icon" style={{ background: 'rgba(96,165,250,0.12)', color: '#60a5fa' }}>🔁</span>
+              <div className="hero-stat-value">7 States</div>
+              <div className="hero-stat-label">Ride Lifecycle FSM</div>
+            </div>
+            <div className="hero-stat-card">
+              <span className="hero-stat-icon" style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399' }}>📡</span>
+              <div className="hero-stat-value">0 Polls</div>
+              <div className="hero-stat-label">WebSocket Push Only</div>
+            </div>
+            <div className="hero-stat-card">
+              <span className="hero-stat-icon" style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa' }}>🤖</span>
+              <div className="hero-stat-value">DBSCAN</div>
+              <div className="hero-stat-label">AI Hotspot Detection</div>
+            </div>
           </div>
           <div className="hero-actions">
             <Link to="/playground" className="btn-hero-primary">Try the Playground →</Link>
             <Link to="/architecture" className="btn-hero-ghost">View Architecture</Link>
           </div>
-          <div className="hero-tech-stack">
-            {['FastAPI', 'PostgreSQL + PostGIS', 'Redis', 'Celery', 'WebSocket', 'React + TypeScript'].map(t => (
-              <span key={t} className="tech-chip">{t}</span>
-            ))}
-          </div>
+          <p className="hero-tech-row">
+            FastAPI · PostgreSQL/PostGIS · Redis · Celery · WebSocket · React + TypeScript
+          </p>
         </div>
       </div>
 
@@ -273,7 +289,7 @@ export default function LandingPage() {
       </div>
 
       {/* ── Architecture CTA ── */}
-      <div style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
+      <div style={{ background: 'var(--bg)', borderTop: '1px solid var(--border)' }}>
         <div className="landing-section" style={{ paddingTop: 40, paddingBottom: 52 }}>
           <div className="arch-banner">
             <div className="arch-banner-text">
