@@ -64,6 +64,7 @@ frontend/.vite/
 # Tooling / local state
 # -----------------------------
 .claude/
+rideflow_ai_project_master_plan.md
 
 # -----------------------------
 # Infrastructure / containers
