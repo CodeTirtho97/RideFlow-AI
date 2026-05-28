@@ -16,7 +16,8 @@ but as a working, deployable backend with a live demo.
 
 </div>
 
-<img width="1408" height="845" alt="image" src="https://github.com/user-attachments/assets/bb5ac6e9-1359-486e-aaeb-19d2ddb9ad94" />
+<img width="1190" height="750" alt="image" src="https://github.com/user-attachments/assets/65085364-73d2-43d8-aaba-38473afe87ce" />
+
 
 ---
 
