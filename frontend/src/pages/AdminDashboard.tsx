@@ -10,8 +10,8 @@ import { InfoModal } from '../components/InfoModal'
 import { useToast } from '../components/Toast'
 import { MetricsDetailModal } from '../components/MetricsDetailModal'
 import type { MetricType, MetricItem } from '../components/MetricsDetailModal'
-import { getMetrics, demoReset } from '../api/client'
-import type { SystemMetrics } from '../api/client'
+import { getMetrics, demoReset, getAvailableDrivers } from '../api/client'
+import type { SystemMetrics, AvailableDriver } from '../api/client'
 
 const EMPTY_METRICS: SystemMetrics = {
   drivers: { available: 0, busy: 0, offline: 0, total: 0 },
@@ -119,12 +119,6 @@ function formatEta(sec: number): string {
   return m > 0 ? `${m}m ${s.toString().padStart(2, '0')}s` : `${s}s`
 }
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-function formatRideDate(ts: number): string {
-  const d = new Date(ts)
-  return `${String(d.getDate()).padStart(2,'0')}-${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`
-}
 
 function formatRideTime(ts: number): string {
   const d = new Date(ts)
@@ -149,6 +143,7 @@ export default function AdminDashboard() {
 
   const [metrics, setMetrics] = useState<SystemMetrics>(EMPTY_METRICS)
   const [lastRefresh, setLastRefresh] = useState<string>('—')
+  const [availableDrivers, setAvailableDrivers] = useState<AvailableDriver[]>([])
   const [rideActivity, setRideActivity] = useState<RideActivity[]>([])
   const [clearing, setClearing] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([
@@ -156,6 +151,7 @@ export default function AdminDashboard() {
   ])
   const [showExplainModal, setShowExplainModal] = useState(false)
   const [aiHotspots, setAiHotspots] = useState<import('../api/client').AiHotspot[]>([])
+  const [activeAdminHotspotIdx, setActiveAdminHotspotIdx] = useState(0)
   const metricsRef = useRef(metrics)
   metricsRef.current = metrics
 
@@ -195,8 +191,9 @@ export default function AdminDashboard() {
 
   const refreshMetrics = useCallback(async () => {
     try {
-      const res = await getMetrics()
-      setMetrics(res.data)
+      const [metricsRes, driversRes] = await Promise.all([getMetrics(), getAvailableDrivers()])
+      setMetrics(metricsRes.data)
+      setAvailableDrivers(driversRes.data)
       setLastRefresh(new Date().toTimeString().slice(0, 8))
     } catch {
       addLog(logEntry('error', 'Could not reach backend metrics endpoint.'))
@@ -228,6 +225,8 @@ export default function AdminDashboard() {
       setRideActivity([])
       setLastRefresh('—')
       setAiHotspots([])
+      setActiveAdminHotspotIdx(0)
+      setAvailableDrivers([])
       addLog(logEntry('event', 'All data cleared — system is back to a clean state. Safe to demo again.'))
     } catch {
       addLog(logEntry('error', 'Clear failed. Is the backend running on port 8000?'))
@@ -381,6 +380,7 @@ export default function AdminDashboard() {
       } else if (event === 'ai_cycle_update') {
         const incoming = (data.hotspots as import('../api/client').AiHotspot[]) || []
         setAiHotspots(incoming)
+        setActiveAdminHotspotIdx(0)
         if (incoming.length > 0) {
           addLog(logEntry('system',
             `AI update: ${incoming.length} demand hotspot(s)`,
@@ -538,17 +538,52 @@ export default function AdminDashboard() {
                 {drivers.total} total
               </span>
             </div>
-            <div className="card-body">
+            <div className="card-body flex-col gap-10">
               {drivers.total === 0 ? (
                 <p className="text-muted">
                   No drivers registered yet. Seed some using the{' '}
                   <Link to="/playground" style={{ color: 'var(--blue)' }}>Playground</Link>.
                 </p>
               ) : (
-                <DriverPoolBar available={drivers.available} busy={drivers.busy} offline={drivers.offline} />
+                <>
+                  <DriverPoolBar available={drivers.available} busy={drivers.busy} offline={drivers.offline} />
+                  {availableDrivers.length > 0 && (() => {
+                    // Derive busy driver names from rideActivity
+                    const busyNames = new Set(
+                      rideActivity
+                        .filter(r => r.status === 'matched' || r.status === 'in_progress')
+                        .map(r => r.driverName)
+                        .filter(Boolean)
+                    )
+                    const allDrivers = [
+                      ...availableDrivers.map(d => ({ name: d.name, status: busyNames.has(d.name) ? 'busy' : 'available' as string })),
+                      ...[...busyNames]
+                        .filter(n => !availableDrivers.some(d => d.name === n))
+                        .map(n => ({ name: n!, status: 'busy' })),
+                    ].slice(0, 20)
+                    const statusColor = (s: string) =>
+                      s === 'available' ? '#16a34a' : s === 'busy' ? '#2563eb' : '#94a3b8'
+                    const statusLabel = (s: string) =>
+                      s === 'available' ? 'Idle' : s === 'busy' ? 'On Trip' : 'Offline'
+                    return (
+                      <div className="no-scrollbar" style={{ maxHeight: 160, overflowY: 'auto' }}>
+                        {allDrivers.map((d, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < allDrivers.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor(d.status), display: 'inline-block', flexShrink: 0 }} />
+                              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>{d.name}</span>
+                            </div>
+                            <span style={{ fontSize: 11, color: statusColor(d.status), fontWeight: 600 }}>{statusLabel(d.status)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </>
               )}
             </div>
           </div>
+
 
         </div>
 
@@ -602,127 +637,134 @@ export default function AdminDashboard() {
                     {aiHotspots.length} HOTSPOT{aiHotspots.length !== 1 ? 'S' : ''}
                   </span>
                 </div>
-                <div className="card-body flex-col gap-12">
-                  {/* Fleet-level summary */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div style={{ background: 'rgba(220,38,38,0.06)', padding: '8px', borderRadius: 4, borderLeft: '3px solid var(--red)' }}>
-                      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Unmatched Riders</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--red)', lineHeight: 1 }}>{adminTotalShortage}</div>
-                    </div>
-                    <div style={{ background: 'rgba(34,197,94,0.06)', padding: '8px', borderRadius: 4, borderLeft: '3px solid var(--green)' }}>
-                      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Drivers Needed</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--green)', lineHeight: 1 }}>+{adminTotalDeploy}</div>
-                    </div>
+                <div className="card-body" style={{ padding: 0 }}>
+                  {/* Fleet summary */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
+                    {[
+                      { label: 'Unmatched Riders', value: String(adminTotalShortage), color: '#ef4444' },
+                      { label: 'Drivers Needed', value: `+${adminTotalDeploy}`, color: '#16a34a' },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+                      </div>
+                    ))}
                   </div>
 
-                  {aiHotspots.map((h, idx) => (
-                    <div key={idx} style={{ padding: '10px', borderRadius: 6, background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.08)' }}>
-                      {/* Zone + status */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{h.zone_name}</span>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: adminStatusColor(h.zone_status), background: `${adminStatusColor(h.zone_status)}18`, padding: '2px 6px', borderRadius: 4 }}>
-                          {h.zone_status.toUpperCase()}
-                        </span>
-                      </div>
-
-                      {/* Summary sentence */}
-                      <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 9 }}>
-                        {h.shortage > 0
-                          ? `${h.unmatched_pct}% of requests unmatched. Fares est. +${h.fare_increase_pct}% above baseline.`
-                          : 'Supply meets demand in this zone.'}
-                      </div>
-
-                      {/* Compact metrics */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 9, fontSize: 9 }}>
-                        {[
-                          { l: 'Demand', v: String(h.demand), c: 'var(--red)' },
-                          { l: 'Supply', v: String(h.drivers_nearby), c: 'var(--green)' },
-                          { l: 'Confidence', v: `${(h.confidence * 100).toFixed(0)}%`, c: 'var(--yellow)' },
-                        ].map(({ l, v, c }) => (
-                          <div key={l} style={{ textAlign: 'center', background: 'rgba(0,0,0,0.03)', padding: '5px', borderRadius: 4 }}>
-                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase' }}>{l}</div>
-                            <div style={{ fontWeight: 700, color: c }}>{v}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Operational actions */}
-                      <div style={{ borderTop: '1px solid rgba(0,0,0,0.07)', paddingTop: 8, marginBottom: h.nearest_drivers.length > 0 ? 8 : 0 }}>
-                        <div style={{ fontSize: 7, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Recommended Actions</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, fontSize: 9 }}>
-                          <div style={{ background: 'rgba(34,197,94,0.08)', padding: '6px', borderRadius: 4, textAlign: 'center' }}>
-                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2 }}>DISPATCH</div>
-                            <div style={{ fontWeight: 800, color: 'var(--green)', fontSize: 12 }}>+{h.deploy_recommendation}</div>
-                          </div>
-                          <div style={{ background: 'rgba(249,115,22,0.08)', padding: '6px', borderRadius: 4, textAlign: 'center' }}>
-                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2 }}>SURGE</div>
-                            <div style={{ fontWeight: 800, color: 'var(--orange)', fontSize: 12 }}>{h.surge_multiplier}x</div>
-                          </div>
-                          <div style={{ background: 'rgba(59,130,246,0.08)', padding: '6px', borderRadius: 4, textAlign: 'center' }}>
-                            <div style={{ fontSize: 7, color: 'var(--text-muted)', marginBottom: 2 }}>ETA</div>
-                            <div style={{ fontWeight: 800, color: 'var(--blue)', fontSize: 12 }}>{h.eta_minutes}m</div>
-                          </div>
+                  {/* Zone navigator */}
+                  {aiHotspots.length > 1 && (() => {
+                    const si = Math.min(activeAdminHotspotIdx, aiHotspots.length - 1)
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+                        <button onClick={() => setActiveAdminHotspotIdx(Math.max(0, si - 1))} disabled={si === 0}
+                          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: si === 0 ? 'default' : 'pointer', fontSize: 16, fontWeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: si === 0 ? 0.3 : 0.9 }}>‹</button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Zone {si + 1} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>of {aiHotspots.length}</span></span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: adminStatusColor(aiHotspots[si].zone_status), padding: '2px 8px', borderRadius: 4 }}>
+                            {aiHotspots[si].zone_status.toUpperCase()}
+                          </span>
                         </div>
+                        <button onClick={() => setActiveAdminHotspotIdx(Math.min(aiHotspots.length - 1, si + 1))} disabled={si === aiHotspots.length - 1}
+                          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: si === aiHotspots.length - 1 ? 'default' : 'pointer', fontSize: 16, fontWeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: si === aiHotspots.length - 1 ? 0.3 : 0.9 }}>›</button>
                       </div>
+                    )
+                  })()}
 
-                      {/* Reposition candidates */}
-                      {h.nearest_drivers.length > 0 && (
-                        <div style={{ borderTop: '1px solid rgba(0,0,0,0.07)', paddingTop: 8 }}>
-                          <div style={{ fontSize: 7, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>
-                            {h.nearest_drivers.every(d => d.status === 'available') ? 'Reposition Candidates' : 'Nearest Drivers (all busy)'}
+                  {(() => {
+                    const safeIdx = Math.min(activeAdminHotspotIdx, aiHotspots.length - 1)
+                    const h = aiHotspots[safeIdx]
+                    const sc = adminStatusColor(h.zone_status)
+                    return (
+                      <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {/* Zone name + single-zone status */}
+                        {aiHotspots.length === 1 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{h.zone_name}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: sc, padding: '2px 8px', borderRadius: 4 }}>{h.zone_status.toUpperCase()}</span>
                           </div>
-                          {h.nearest_drivers.map((d, i) => {
-                            const isAvailable = d.status === 'available'
-                            return (
-                              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: i < h.nearest_drivers.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: isAvailable ? '#f97316' : '#64748b', display: 'inline-block' }} />
-                                  <span style={{ fontSize: 10, fontWeight: 600, color: isAvailable ? 'var(--text)' : 'var(--text-muted)' }}>{d.name}</span>
-                                  {!isAvailable && <span style={{ fontSize: 8, color: 'var(--text-muted)', fontStyle: 'italic' }}>({d.status?.replace('_', ' ')})</span>}
-                                </div>
-                                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{d.distance_km} km</span>
+                        )}
+                        {aiHotspots.length > 1 && (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{h.zone_name}</span>
+                        )}
+
+                        {/* Summary */}
+                        <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.55, fontWeight: 500 }}>
+                          {h.shortage > 0
+                            ? `${h.unmatched_pct}% of riders unmatched — ${h.shortage} of ${h.demand} requests have no driver.`
+                            : 'Supply meets demand in this zone. No action required.'}
+                        </div>
+
+                        {/* Metrics grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                          {[
+                            { label: 'Riders waiting', value: String(h.demand), color: '#ef4444' },
+                            { label: 'Idle drivers', value: String(h.drivers_nearby), color: '#16a34a' },
+                            { label: 'Unmatched', value: `${h.unmatched_pct}%`, color: '#ea580c' },
+                            { label: 'Confidence', value: `${(h.confidence * 100).toFixed(0)}%`, color: '#64748b' },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Fare impact */}
+                        {h.fare_increase_pct > 0 && (
+                          <div style={{ borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                            <div style={{ padding: '6px 10px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Fare Impact</div>
+                            <div style={{ padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>~{h.fare_increase_pct}% above baseline</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{h.unmatched_pct}% demand-supply gap</div>
                               </div>
-                            )
-                          })}
+                              <div style={{ fontSize: 18, fontWeight: 800, color: '#ea580c' }}>{h.surge_multiplier}x</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Deploy / Surge / ETA */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                          {[
+                            { label: 'Deploy', value: `+${h.deploy_recommendation}`, color: '#16a34a' },
+                            { label: 'Surge', value: `${h.surge_multiplier}x`, color: '#ea580c' },
+                            { label: 'ETA', value: `${h.eta_minutes}m`, color: '#2563eb' },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', textAlign: 'center' }}>
+                              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+                            </div>
+                          ))}
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {/* Nearest drivers */}
+                        {h.nearest_drivers.length > 0 && (
+                          <div style={{ borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                            <div style={{ padding: '6px 10px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              {h.nearest_drivers.every(d => d.status === 'available') ? 'Nearest Idle Drivers' : 'Nearest Drivers (all busy)'}
+                            </div>
+                            {h.nearest_drivers.map((d, i) => {
+                              const isAvailable = d.status === 'available'
+                              return (
+                                <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', borderBottom: i < h.nearest_drivers.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: isAvailable ? '#f97316' : '#94a3b8', display: 'inline-block', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{d.name}</span>
+                                    {!isAvailable && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontStyle: 'italic' }}>({d.status?.replace('_', ' ')})</span>}
+                                  </div>
+                                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500 }}>{d.distance_km} km</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
           )}
 
-          {Object.keys(metrics.by_status).length > 0 && (
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Rides by Status</span>
-              </div>
-              <div className="card-body">
-                {[
-                  'requested', 'searching_driver', 'driver_assigned',
-                  'driver_arriving', 'on_trip', 'completed', 'cancelled',
-                ].map(s => {
-                  const count = metrics.by_status[s] ?? 0
-                  if (count === 0) return null
-                  const colors: Record<string, string> = {
-                    requested: 'badge-gray', searching_driver: 'badge-yellow',
-                    driver_assigned: 'badge-blue', driver_arriving: 'badge-blue',
-                    on_trip: 'badge-green', completed: 'badge-green', cancelled: 'badge-red',
-                  }
-                  return (
-                    <div key={s} className="info-row">
-                      <span className="info-label">
-                        <span className={`badge ${colors[s] ?? 'badge-gray'}`} style={{ fontSize: 10 }}>
-                          {s.replace(/_/g, ' ')}
-                        </span>
-                      </span>
-                      <span className="info-value">{count}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
 
           <div className="card">
             <div className="card-header">
@@ -740,7 +782,7 @@ export default function AdminDashboard() {
                 )}
               </div>
             </div>
-            <div className="card-body" style={{ maxHeight: 480, overflowY: 'auto', padding: '6px 12px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="card-body" style={{ maxHeight: 320, overflowY: 'auto', padding: '6px 12px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
               {rideActivity.length === 0 ? (
                 <p className="text-muted" style={{ fontSize: 12, padding: '8px 0' }}>
                   No dispatches yet. Run the Playground or use the Rider tab to book a ride.
@@ -748,77 +790,64 @@ export default function AdminDashboard() {
               ) : rideActivity.map(r => {
                 const isExpanded = expandedRides.has(r.rideId)
                 const statusCfg = (
-                  r.status === 'completed'   ? { cls: 'badge-green',  label: 'Completed'     } :
-                  r.status === 'cancelled'   ? { cls: 'badge-red',    label: 'Cancelled'     } :
-                  r.status === 'in_progress' ? { cls: 'badge-blue',   label: 'On Trip'       } :
-                  r.status === 'matched'     ? { cls: 'badge-blue',   label: 'Driver Coming' } :
-                                               { cls: 'badge-yellow', label: 'Searching'     }
+                  r.status === 'completed'   ? { cls: 'badge-green',  label: 'Completed',    accent: '#16a34a' } :
+                  r.status === 'cancelled'   ? { cls: 'badge-red',    label: 'Cancelled',    accent: '#dc2626' } :
+                  r.status === 'in_progress' ? { cls: 'badge-blue',   label: 'On Trip',      accent: '#2563eb' } :
+                  r.status === 'matched'     ? { cls: 'badge-blue',   label: 'Driver Coming',accent: '#2563eb' } :
+                                               { cls: 'badge-yellow', label: 'Searching',    accent: '#d97706' }
                 )
-                const cardBg =
-                  r.status === 'completed'   ? 'var(--green-light)'            :
-                  r.status === 'cancelled'   ? 'rgba(239,68,68,0.05)'          :
-                  r.status === 'in_progress' ? 'rgba(59,130,246,0.06)'         :
-                  'var(--gray-light)'
-                const cardBorder =
-                  r.status === 'completed'   ? 'var(--border-success)'         :
-                  r.status === 'cancelled'   ? 'rgba(239,68,68,0.25)'          :
-                  r.status === 'in_progress' ? 'rgba(59,130,246,0.22)'         :
-                  'var(--border)'
 
                 return (
                   <div key={r.rideId} style={{
                     borderRadius: 8,
-                    border: `1px solid ${cardBorder}`,
-                    background: cardBg,
-                    padding: '8px 12px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface)',
                   }}>
 
-                    {/* Collapsed header — click to expand */}
+                    {/* Collapsed header */}
                     <div
                       onClick={() => toggleExpanded(r.rideId)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', cursor: 'pointer', userSelect: 'none' }}
                     >
-                      <span className={`badge ${statusCfg.cls}`} style={{ fontSize: 10, flexShrink: 0 }}>
-                        {statusCfg.label}
-                      </span>
-                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, color: 'var(--text)' }}>
-                        {r.rideId.slice(0, 8)}
-                      </span>
-                      <span style={{ flex: 1 }} />
-                      <div style={{ textAlign: 'right', lineHeight: 1.5 }}>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                          {r.timestamp ? formatRideDate(r.timestamp) : '—'}
+                      {/* Status dot */}
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusCfg.accent, flexShrink: 0, marginTop: 1 }} />
+
+                      {/* Driver name or fallback */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.driverName ?? 'No driver yet'}
                         </div>
-                        <div style={{ fontSize: 10, fontFamily: 'ui-monospace, monospace', color: 'var(--text-muted)' }}>
-                          {r.timestamp ? formatRideTime(r.timestamp) : '—'}
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
+                          {statusCfg.label}
+                          {r.fare != null && <span style={{ marginLeft: 6, color: 'var(--text)' }}>₹{r.fare.toFixed(0)}</span>}
                         </div>
                       </div>
-                      <svg
-                        width="14" height="14" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" strokeWidth="2.2"
-                        strokeLinecap="round" strokeLinejoin="round"
-                        style={{
-                          color: 'var(--text-muted)', marginLeft: 4, flexShrink: 0,
-                          transition: 'transform 0.2s ease',
-                          transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                        }}
-                      >
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
+
+                      {/* Time + chevron */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                          {r.timestamp ? formatRideTime(r.timestamp) : '—'}
+                        </span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+                          strokeLinecap="round" strokeLinejoin="round"
+                          style={{ color: 'var(--text-muted)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </div>
                     </div>
 
                     {/* Expanded detail panel */}
                     {isExpanded && (
-                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                        <DetailRow label="Driver" value={r.driverName} />
-                        <DetailRow label="Source" value={r.pickupLat != null && r.pickupLng != null ? `${r.pickupLat.toFixed(4)}°N, ${r.pickupLng.toFixed(4)}°E` : undefined} />
-                        <DetailRow label="Destination" value={r.destLat != null && r.destLng != null ? `${r.destLat.toFixed(4)}°N, ${r.destLng.toFixed(4)}°E` : undefined} />
-                        <DetailRow label="Distance" value={r.distanceKm != null ? `${r.distanceKm} km` : undefined} />
-                        <DetailRow label="Duration" value={r.durationMin != null ? `${r.durationMin} min` : undefined} />
-                        <DetailRow label="Fare" value={r.fare != null ? `₹${r.fare.toFixed(2)}` : undefined} />
+                      <div style={{ borderTop: `2px solid ${statusCfg.accent}`, background: 'var(--bg)', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <DetailRow label="Driver"       value={r.driverName} />
+                        <DetailRow label="Pickup"       value={r.pickupLat != null ? `${r.pickupLat.toFixed(4)}°N, ${r.pickupLng!.toFixed(4)}°E` : undefined} />
+                        <DetailRow label="Destination"  value={r.destLat   != null ? `${r.destLat.toFixed(4)}°N, ${r.destLng!.toFixed(4)}°E`    : undefined} />
+                        <DetailRow label="Distance"     value={r.distanceKm  != null ? `${r.distanceKm} km`         : undefined} />
+                        <DetailRow label="Duration"     value={r.durationMin != null ? `${r.durationMin} min`        : undefined} />
+                        <DetailRow label="Fare"         value={r.fare        != null ? `₹${r.fare.toFixed(2)}`       : undefined} />
                         {r.surgeMultiplier != null && r.surgeMultiplier > 1.0 && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11 }}>
-                            <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>Surge</span>
+                            <span style={{ color: 'var(--text-muted)' }}>Surge</span>
                             <span className="badge badge-yellow" style={{ fontSize: 9 }}>{r.surgeMultiplier}× surge</span>
                           </div>
                         )}

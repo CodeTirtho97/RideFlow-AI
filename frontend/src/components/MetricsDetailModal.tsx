@@ -150,213 +150,178 @@ export function MetricsDetailModal({
 
       {/* Modal */}
       <div
-        className="no-scrollbar"
         style={{
           position: 'fixed',
           top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 'min(520px, calc(100vw - 32px))',
-          maxHeight: 'calc(100vh - 48px)',
-          overflowY: 'auto',
+          width: items && items.length > 0
+            ? 'min(820px, calc(100vw - 32px))'
+            : 'min(520px, calc(100vw - 32px))',
+          maxHeight: 'calc(100vh - 80px)',
           background: 'var(--surface)',
           borderRadius: 12,
           boxShadow: '0 24px 64px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.12)',
           zIndex: 1001,
           border: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
         {/* Accent bar */}
-        <div style={{ height: 3, background: cfg.accent, borderRadius: '12px 12px 0 0' }} />
+        <div style={{ height: 3, background: cfg.accent, borderRadius: '12px 12px 0 0', flexShrink: 0 }} />
 
-        <div style={{ padding: '22px 24px 24px', position: 'relative' }}>
+        {/* Close button */}
+        <button
+          onMouseEnter={() => setCloseHovered(true)}
+          onMouseLeave={() => setCloseHovered(false)}
+          onClick={onClose}
+          style={{
+            position: 'absolute', top: 14, right: 16,
+            width: 26, height: 26,
+            border: `1px solid ${closeHovered ? 'var(--red)' : 'var(--border)'}`,
+            borderRadius: 6,
+            background: closeHovered ? 'var(--red)' : 'var(--surface)',
+            color: closeHovered ? '#fff' : 'var(--text-muted)',
+            cursor: 'pointer',
+            fontSize: 15, fontWeight: 700, lineHeight: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.15s',
+            zIndex: 1,
+          }}
+        >
+          ×
+        </button>
 
-          {/* Close button */}
-          <button
-            onMouseEnter={() => setCloseHovered(true)}
-            onMouseLeave={() => setCloseHovered(false)}
-            onClick={onClose}
+        {/* Body — 2-col when items, 1-col otherwise */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: items && items.length > 0 ? '1fr 1fr' : '1fr',
+          flex: 1,
+          minHeight: 0,
+        }}>
+
+          {/* Left: info panel (scrollable) */}
+          <div
+            className="no-scrollbar"
             style={{
-              position: 'absolute', top: 18, right: 18,
-              width: 26, height: 26,
-              border: `1px solid ${closeHovered ? 'var(--red)' : 'var(--border)'}`,
-              borderRadius: 6,
-              background: closeHovered ? 'var(--red)' : 'var(--surface)',
-              color: closeHovered ? '#fff' : 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: 15, fontWeight: 700, lineHeight: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.15s',
+              overflowY: 'auto',
+              padding: '20px 22px 24px',
+              borderRight: items && items.length > 0 ? '1px solid var(--border)' : 'none',
             }}
           >
-            ×
-          </button>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 36, marginBottom: 18 }}>
+              <div style={{ width: 3, height: 20, borderRadius: 2, background: cfg.accent, flexShrink: 0 }} />
+              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>
+                {cfg.title}
+              </span>
+            </div>
 
-          {/* Header: accent left-bar + title */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            paddingRight: 36, marginBottom: 20,
-          }}>
-            <div style={{
-              width: 3, height: 20, borderRadius: 2,
-              background: cfg.accent, flexShrink: 0,
-            }} />
-            <span style={{
-              fontSize: 16, fontWeight: 700,
-              color: 'var(--text)', lineHeight: 1.2,
-            }}>
-              {cfg.title}
-            </span>
-          </div>
+            {/* Count */}
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ fontSize: 48, fontWeight: 800, color: cfg.accent, lineHeight: 1, letterSpacing: '-0.02em' }}>
+                {count}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, marginBottom: 0 }}>
+              {cfg.countLabel}
+            </div>
 
-          {/* Count display */}
-          <div style={{ marginBottom: 4 }}>
-            <span style={{
-              fontSize: 48, fontWeight: 800,
-              color: cfg.accent, lineHeight: 1,
-              fontFamily: "'Inter', system-ui, sans-serif",
-              letterSpacing: '-0.02em',
-            }}>
-              {count}
-            </span>
-          </div>
-          <div style={{
-            fontSize: 12, color: 'var(--text-muted)',
-            fontWeight: 500, marginBottom: 0,
-          }}>
-            {cfg.countLabel}
-          </div>
+            <Divider />
+            <SectionLabel>What this means</SectionLabel>
+            <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, margin: 0 }}>{cfg.what}</p>
 
-          <Divider />
-
-          {/* What does this mean */}
-          <SectionLabel>What this means</SectionLabel>
-          <p style={{
-            fontSize: 13, color: 'var(--text)',
-            lineHeight: 1.7, margin: 0,
-          }}>
-            {cfg.what}
-          </p>
-
-          <Divider />
-
-          {/* Lifecycle flow */}
-          <SectionLabel>Ride lifecycle</SectionLabel>
-          <div>
-            {/* Main stages */}
-            <div style={{
-              display: 'flex', alignItems: 'center',
-              flexWrap: 'wrap', gap: '5px 2px',
-            }}>
-              {LIFECYCLE_STAGES.map((stage, i) => {
-                const hl = cfg.highlightedStages.includes(stage.id)
-                return (
-                  <span key={stage.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                    <span style={{
-                      padding: '3px 9px', borderRadius: 99,
-                      fontSize: 11, fontWeight: hl ? 600 : 400,
-                      background: hl ? cfg.accentLight : 'transparent',
-                      color: hl ? cfg.accent : 'var(--text-muted)',
-                      border: `1px solid ${hl ? cfg.accentBorder : 'var(--border)'}`,
-                      letterSpacing: hl ? '0.01em' : undefined,
-                    }}>
-                      {stage.label}
-                    </span>
-                    {i < LIFECYCLE_STAGES.length - 1 && (
-                      <span style={{ color: 'var(--border)', fontSize: 12, userSelect: 'none', lineHeight: 1 }}>
-                        ›
+            <Divider />
+            <SectionLabel>Ride lifecycle</SectionLabel>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px 2px' }}>
+                {LIFECYCLE_STAGES.map((stage, i) => {
+                  const hl = cfg.highlightedStages.includes(stage.id)
+                  return (
+                    <span key={stage.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <span style={{
+                        padding: '3px 9px', borderRadius: 99, fontSize: 11,
+                        fontWeight: hl ? 600 : 400,
+                        background: hl ? cfg.accentLight : 'transparent',
+                        color: hl ? cfg.accent : 'var(--text-muted)',
+                        border: `1px solid ${hl ? cfg.accentBorder : 'var(--border)'}`,
+                      }}>
+                        {stage.label}
                       </span>
-                    )}
-                  </span>
-                )
-              })}
+                      {i < LIFECYCLE_STAGES.length - 1 && (
+                        <span style={{ color: 'var(--border)', fontSize: 12, userSelect: 'none', lineHeight: 1 }}>›</span>
+                      )}
+                    </span>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7, paddingLeft: 4 }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: 11, userSelect: 'none' }}>↘</span>
+                <span style={{
+                  padding: '3px 9px', borderRadius: 99, fontSize: 11,
+                  fontWeight: isCancelType ? 600 : 400,
+                  background: isCancelType ? 'var(--red-light)' : 'transparent',
+                  color: isCancelType ? 'var(--red)' : 'var(--text-muted)',
+                  border: `1px solid ${isCancelType ? 'var(--border-error)' : 'var(--border)'}`,
+                }}>
+                  Cancelled
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  if no driver found or rider cancels
+                </span>
+              </div>
             </div>
-            {/* Cancelled branch — always on its own line */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              marginTop: 7, paddingLeft: 4,
-            }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: 11, userSelect: 'none' }}>↘</span>
-              <span style={{
-                padding: '3px 9px', borderRadius: 99,
-                fontSize: 11, fontWeight: isCancelType ? 600 : 400,
-                background: isCancelType ? 'var(--red-light)' : 'transparent',
-                color: isCancelType ? 'var(--red)' : 'var(--text-muted)',
-                border: `1px solid ${isCancelType ? 'var(--border-error)' : 'var(--border)'}`,
-              }}>
-                Cancelled
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                if no driver found or rider cancels
-              </span>
+
+            <Divider />
+            <SectionLabel>How it works</SectionLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 6px', marginBottom: 10 }}>
+              {cfg.facts.map((f, i) => (
+                <span key={i} style={{
+                  fontSize: 11, fontFamily: 'ui-monospace, monospace',
+                  background: 'var(--gray-light)', color: 'var(--text-mono)',
+                  padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)',
+                }}>
+                  {f}
+                </span>
+              ))}
             </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.65, margin: 0, fontStyle: 'italic' }}>
+              {cfg.how}
+            </p>
           </div>
 
-          <Divider />
-
-          {/* How it works */}
-          <SectionLabel>How it works</SectionLabel>
-
-          {/* Fact tags */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 6px', marginBottom: 10 }}>
-            {cfg.facts.map((f, i) => (
-              <span key={i} style={{
-                fontSize: 11, fontFamily: 'ui-monospace, monospace',
-                background: 'var(--gray-light)',
-                color: 'var(--text-mono)',
-                padding: '2px 8px', borderRadius: 4,
-                border: '1px solid var(--border)',
-                letterSpacing: '0.01em',
-              }}>
-                {f}
-              </span>
-            ))}
-          </div>
-
-          {/* Prose */}
-          <p style={{
-            fontSize: 12, color: 'var(--text-muted)',
-            lineHeight: 1.65, margin: 0,
-            fontStyle: 'italic',
-          }}>
-            {cfg.how}
-          </p>
-
-          {/* Items list */}
+          {/* Right: items list (only when items exist) */}
           {items && items.length > 0 && (
-            <>
-              <Divider />
-              <SectionLabel>{`Current (${items.length})`}</SectionLabel>
-              <div className="no-scrollbar" style={{ maxHeight: 200, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ padding: '20px 18px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                <SectionLabel>{`Current entries (${items.length})`}</SectionLabel>
+              </div>
+              <div
+                className="no-scrollbar"
+                style={{ overflowY: 'auto', flex: 1, padding: '8px 18px 16px' }}
+              >
                 {items.map(item => (
                   <div key={item.id} style={{
                     display: 'flex', alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '6px 0 6px 10px',
+                    padding: '8px 0 8px 10px',
                     borderBottom: '1px solid var(--border)',
                     borderLeft: `2px solid ${item.color ?? cfg.accent}`,
-                    marginLeft: 2, paddingLeft: 10,
-                    gap: 8,
+                    marginLeft: 2, gap: 8,
                   }}>
-                    <span style={{
-                      fontFamily: 'ui-monospace, monospace',
-                      color: 'var(--text-muted)', fontSize: 11,
-                      flexShrink: 0,
-                    }}>
+                    <span style={{ fontFamily: 'ui-monospace, monospace', color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
                       {item.label}
                     </span>
                     {item.detail && (
-                      <span style={{
-                        color: item.color ?? 'var(--text)',
-                        fontWeight: 500, fontSize: 12,
-                        textAlign: 'right',
-                      }}>
+                      <span style={{ color: item.color ?? 'var(--text)', fontWeight: 500, fontSize: 12, textAlign: 'right' }}>
                         {item.detail}
                       </span>
                     )}
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           )}
 
         </div>

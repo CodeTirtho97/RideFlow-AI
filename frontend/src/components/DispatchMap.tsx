@@ -57,6 +57,7 @@ interface Props {
   showTooltips?: boolean         // false = suppress all tooltips (Playground — legend is enough)
   searchCircle?: { lat: number; lng: number; radiusKm: number }
   hotspots?: Array<{ center_lat: number; center_lng: number; radius_km: number; demand: number; shortage: number }>
+  activeHotspotIdx?: number
   riderLocation?: { lat: number; lng: number; label?: string }
   legend?: LegendItem[]
   onAnimComplete?: (key: string) => void   // fired when an animation key finishes
@@ -273,6 +274,29 @@ function FitAllPoints({
   return null
 }
 
+// Fly to selected hotspot when activeHotspotIdx changes
+function FlyToHotspot({ hotspots, activeIdx }: {
+  hotspots?: Array<{ center_lat: number; center_lng: number; radius_km: number }>
+  activeIdx?: number
+}) {
+  const map = useMap()
+  const prevIdx = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (activeIdx === undefined || !hotspots || hotspots.length === 0) return
+    if (activeIdx === prevIdx.current) return
+    prevIdx.current = activeIdx
+    const h = hotspots[activeIdx]
+    if (!h) return
+    const rad = (h.radius_km * 1.8) / 111.0
+    const bounds = L.latLngBounds(
+      [h.center_lat - rad, h.center_lng - rad],
+      [h.center_lat + rad, h.center_lng + rad],
+    )
+    map.fitBounds(bounds, { padding: [30, 30], animate: true, duration: 0.7, maxZoom: 15 })
+  }, [activeIdx, hotspots, map])
+  return null
+}
+
 // Smart camera: phase-aware bounds fitting with live tracking during animations
 function SmartCamera({
   drivers, trips, animPos, riderLocation, searchCircle, hotspots, center, zoom, fitTrigger, staticCamera,
@@ -439,6 +463,7 @@ export function DispatchMap({
   showTooltips = true,
   searchCircle,
   hotspots,
+  activeHotspotIdx,
   riderLocation,
   legend,
   onAnimComplete,
@@ -626,6 +651,7 @@ export function DispatchMap({
       <ZoomControl position={uberStyle ? 'bottomright' : 'topleft'} />
 
       <FitAllPoints points={focusPoints} center={center} zoom={zoom} trigger={focusTrigger} />
+      <FlyToHotspot hotspots={hotspots} activeIdx={activeHotspotIdx} />
       <SmartCamera
         drivers={drivers} trips={trips} animPos={animPos}
         riderLocation={riderLocation} searchCircle={searchCircle} hotspots={hotspots}
@@ -726,25 +752,34 @@ export function DispatchMap({
         </>
       )}
 
-      {/* ── AI Hotspot circles ── */}
+      {/* ── AI Hotspot circles — active zone glows, others dim ── */}
       {hotspots && hotspots.map((hotspot, idx) => {
         if (!hotspot.center_lat || !hotspot.center_lng) return null
+        const isActive = activeHotspotIdx === undefined || idx === activeHotspotIdx
         return (
           <React.Fragment key={`hotspot-${idx}`}>
-            <Circle
-              center={[hotspot.center_lat, hotspot.center_lng]}
-              radius={hotspot.radius_km * 1000 * 1.35}
-              pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.05, weight: 1, opacity: 0.35, className: 'hotspot-glow-outer' }}
-            />
+            {isActive && (
+              <Circle
+                center={[hotspot.center_lat, hotspot.center_lng]}
+                radius={hotspot.radius_km * 1000 * 1.35}
+                pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.05, weight: 1, opacity: 0.35, className: 'hotspot-glow-outer' }}
+              />
+            )}
             <Circle
               center={[hotspot.center_lat, hotspot.center_lng]}
               radius={hotspot.radius_km * 1000}
-              pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.18, weight: 2.5, opacity: 0.85, className: 'hotspot-glow' }}
+              pathOptions={{
+                color: '#dc2626', fillColor: '#dc2626',
+                fillOpacity: isActive ? 0.18 : 0.04,
+                weight: isActive ? 2.5 : 1,
+                opacity: isActive ? 0.85 : 0.25,
+                className: isActive ? 'hotspot-glow' : '',
+              }}
             />
             <Marker
               position={[hotspot.center_lat, hotspot.center_lng]}
               icon={L.divIcon({
-                html: `<div style="background: rgba(185,28,28,0.88); color: #fff; padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; letter-spacing: 0.3px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);">Demand Hotspot</div>`,
+                html: `<div style="background: rgba(185,28,28,${isActive ? '0.88' : '0.35'}); color: #fff; padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; letter-spacing: 0.3px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isActive ? 1 : 0.4}">Hotspot Zone ${idx + 1}</div>`,
                 className: '',
                 iconSize: [120, 24],
                 iconAnchor: [60, 38],

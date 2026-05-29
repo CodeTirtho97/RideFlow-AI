@@ -2011,6 +2011,10 @@ html, body, #root {
   line-height: 1.35;
 }
 
+/* Hide scrollbar utility */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
 /* Driver pool bar */
 .pool-bar-wrap { margin: 4px 0; }
 .pool-bar {

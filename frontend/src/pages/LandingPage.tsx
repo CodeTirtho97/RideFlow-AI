@@ -342,9 +342,62 @@ export default function LandingPage() {
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid var(--border)', padding: '20px 24px', textAlign: 'center', background: 'var(--surface)' }}>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          RideFlow AI — Built with FastAPI · PostgreSQL + PostGIS · Redis · Celery · React · TypeScript
+      <div style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)', padding: '20px 24px', textAlign: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, flexWrap: 'wrap', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Developed by</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Tirthoraj Bhattacharya</div>
+          </div>
+          <div style={{ width: '1px', height: 32, background: 'var(--border)' }} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <a
+              href="https://www.tirthorajportfolio.xyz/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: 13, fontWeight: 600, color: 'var(--blue)', textDecoration: 'none',
+                padding: '5px 11px', borderRadius: 5, border: '1px solid var(--text)',
+                background: 'transparent', cursor: 'pointer', transition: 'all 0.2s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'var(--blue)'
+                e.currentTarget.style.color = 'white'
+                e.currentTarget.style.borderColor = 'var(--blue)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--blue)'
+                e.currentTarget.style.borderColor = 'var(--text)'
+              }}
+            >
+              Portfolio
+            </a>
+            <a
+              href="https://github.com/CodeTirtho97"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: 13, fontWeight: 600, color: 'var(--blue)', textDecoration: 'none',
+                padding: '5px 11px', borderRadius: 5, border: '1px solid var(--text)',
+                background: 'transparent', cursor: 'pointer', transition: 'all 0.2s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'var(--blue)'
+                e.currentTarget.style.color = 'white'
+                e.currentTarget.style.borderColor = 'var(--blue)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--blue)'
+                e.currentTarget.style.borderColor = 'var(--text)'
+              }}
+            >
+              GitHub
+            </a>
+          </div>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--blue)', margin: 0, lineHeight: 1.4, opacity: 0.75 }}>
+          Built with FastAPI · PostgreSQL + PostGIS · Redis · Celery · React · TypeScript
         </p>
       </div>
     </div>
