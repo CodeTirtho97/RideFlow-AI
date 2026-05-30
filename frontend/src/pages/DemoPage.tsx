@@ -15,6 +15,8 @@ import type { MapDriver, MapTrip, MapAnimEvent } from '../components/DispatchMap
 
 import { useToast } from '../components/Toast'
 import { MetricsDetailModal } from '../components/MetricsDetailModal'
+import { UsageLimitModal } from '../components/UsageLimitModal'
+import { useRunLimit } from '../hooks/useRunLimit'
 import type { MetricType, MetricItem } from '../components/MetricsDetailModal'
 
 interface RecentMatch {
@@ -128,6 +130,7 @@ export default function DemoPage() {
   useEffect(() => { document.title = 'Playground | RideFlow AI' }, [])
   const { toast } = useToast()
   const { theme } = useTheme()
+  const { runsUsed, limit, limitReached, globalLimitReached, incrementRun } = useRunLimit('rideflow_playground_runs', 3)
 
   const [preset, setPreset] = useState<Preset>('light')
   const [steps, setSteps] = useState<Record<string, StepState>>({
@@ -590,6 +593,7 @@ export default function DemoPage() {
       setCancelledRideLog([])
       addLog(logEntry('event', res.data.message))
       addLog(logEntry('system', '─── Simulation reset. Previous history kept. Select a scenario and start again when ready. ───'))
+      incrementRun()
     } catch (err) {
       const msg = apiError(err)
       addLog(logEntry('error', `Reset failed: ${msg}`))
@@ -609,6 +613,7 @@ export default function DemoPage() {
 
   const isStepEnabled = (requires: string | null, key: string, comingSoon?: boolean): boolean => {
     if (comingSoon) return false
+    if (limitReached && (key === 'seed')) return false
     if (steps[key] === 'running') return false
     // AI step can always be re-run; all other steps lock once done
     if (steps[key] === 'done' && key !== 'ai') return false
@@ -643,8 +648,14 @@ export default function DemoPage() {
   const dsFares = recentMatches.filter(m => m.at.startsWith('✓')).map(m => parseFloat(m.at.replace('✓ ₹', ''))).filter(f => !isNaN(f))
   const dsAvgFare = dsFares.length > 0 ? (dsFares.reduce((a, b) => a + b, 0) / dsFares.length).toFixed(0) : null
 
-  const hotspotStatusColor = (s: string) =>
-    s === 'Critical' ? 'var(--red)' : s === 'High' ? 'var(--orange)' : s === 'Moderate' ? 'var(--yellow)' : 'var(--green)'
+  // Returns hardcoded hex pairs so badges are readable in both light and dark themes.
+  // var(--orange) was never defined in the CSS — this avoids invisible "High" badges.
+  const hotspotStatusColor = (s: string): { bg: string; text: string } => {
+    if (s === 'Critical') return { bg: '#dc2626', text: '#fff' }
+    if (s === 'High')     return { bg: '#ea580c', text: '#fff' }
+    if (s === 'Moderate') return { bg: '#d97706', text: '#fff' }
+    return                       { bg: '#16a34a', text: '#fff' }  // Normal
+  }
   const tooltipBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
   const tooltipBorder = theme === 'dark' ? '#333' : '#d1d5db'
   const tooltipText = theme === 'dark' ? '#f0f0f0' : '#111827'
@@ -939,6 +950,7 @@ export default function DemoPage() {
                 <button
                   className="btn btn-danger btn-sm"
                   onClick={handleReset}
+                  disabled={limitReached}
                   title="Wipe all drivers, rides, and predictions — start fresh"
                   style={{ fontSize: 11, padding: '3px 10px', flexShrink: 0 }}
                 >
@@ -946,6 +958,29 @@ export default function DemoPage() {
                 </button>
               </div>
             </div>
+            {/* Usage counter banner */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '7px 14px',
+              background: limitReached ? 'rgba(220,38,38,0.08)' : 'rgba(0,0,0,0.03)',
+              borderTop: '1px solid var(--border)',
+              borderBottom: '1px solid var(--border)',
+            }}>
+              <span style={{ fontSize: 11, color: limitReached ? 'var(--red)' : 'var(--text-muted)' }}>
+                {limitReached ? 'Demo limit reached — runs exhausted' : `Demo runs: ${runsUsed} / ${limit} used`}
+              </span>
+              {!limitReached && runsUsed > 0 && (
+                <span style={{ display: 'flex', gap: 4 }}>
+                  {Array.from({ length: limit }).map((_, i) => (
+                    <span key={i} style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: i < runsUsed ? 'var(--red)' : 'var(--border)',
+                    }} />
+                  ))}
+                </span>
+              )}
+            </div>
+
             <div className="card-body flex-col gap-12">
               {STEPS.map((step, stepIdx) => {
                 const state = steps[step.key]
@@ -1144,7 +1179,7 @@ export default function DemoPage() {
                             style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: safeIdx === 0 ? 'default' : 'pointer', fontSize: 16, fontWeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: safeIdx === 0 ? 0.3 : 0.9, transition: 'opacity 0.15s' }}>‹</button>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Zone {safeIdx + 1} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>of {aiHotspots.length}</span></span>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: statusColor, padding: '2px 8px', borderRadius: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: statusColor.text, background: statusColor.bg, padding: '2px 8px', borderRadius: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>
                               {hotspot.zone_status.toUpperCase()}
                             </span>
                           </div>
@@ -1160,7 +1195,7 @@ export default function DemoPage() {
                         {aiHotspots.length === 1 && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{hotspot.zone_name}</span>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: statusColor, padding: '2px 8px', borderRadius: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: statusColor.text, background: statusColor.bg, padding: '2px 8px', borderRadius: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}>
                               {hotspot.zone_status.toUpperCase()}
                             </span>
                           </div>
@@ -1395,11 +1430,50 @@ export default function DemoPage() {
         />
       )}
 
+      {(limitReached || globalLimitReached) && (
+        <UsageLimitModal
+          page="Playground"
+          runsUsed={runsUsed}
+          limit={limit}
+          isGlobal={globalLimitReached && !limitReached}
+        />
+      )}
+
       <InfoModal
         open={showExplainModal}
         title="Playground Guide: What You Are Testing"
         onClose={() => setShowExplainModal(false)}
       >
+        {/* Run-limit notice */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(234,179,8,0.18) 0%, rgba(234,179,8,0.08) 100%)',
+          border: '1.5px solid rgba(234,179,8,0.55)',
+          borderRadius: 10, padding: '14px 16px', marginBottom: 4,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 800, color: '#b45309',
+            textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8,
+          }}>
+            Demo Run Limit
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.65, margin: 0 }}>
+            The <strong>Playground</strong> allows{' '}
+            <span style={{ color: '#dc2626', fontWeight: 800, fontSize: 14 }}>3 free runs</span>.{' '}
+            One run is counted each time you click{' '}
+            <strong style={{ color: '#dc2626' }}>Reset</strong>{' '}
+            after a session. Runs are stored in your browser and persist across refreshes.
+          </p>
+          <div style={{
+            marginTop: 10, display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 10px', background: 'rgba(0,0,0,0.06)', borderRadius: 6,
+          }}>
+            <span style={{ fontSize: 18 }}>🔒</span>
+            <span style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.5 }}>
+              Once the limit is hit, a modal blocks the page. Return to Home to reset your session.
+            </span>
+          </div>
+        </div>
+
         <div className="info-modal-block">
           <div className="info-modal-block-title">Big picture</div>
           <p className="info-modal-block-text">

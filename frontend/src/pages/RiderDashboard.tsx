@@ -7,6 +7,8 @@ import type { LogEntry } from '../components/EventLog'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { InfoModal } from '../components/InfoModal'
 import { useToast } from '../components/Toast'
+import { UsageLimitModal } from '../components/UsageLimitModal'
+import { useRunLimit } from '../hooks/useRunLimit'
 import { createRide, cancelRide, getAvailableDrivers, seedDrivers } from '../api/client'
 import type { RideReceipt, AvailableDriver } from '../api/client'
 import { DispatchMap, fetchRoute } from '../components/DispatchMap'
@@ -192,6 +194,7 @@ export default function RiderDashboard() {
   useEffect(() => { document.title = 'Rider | RideFlow AI' }, [])
 
   const { toast } = useToast()
+  const { runsUsed, limit, limitReached, globalLimitReached, incrementRun } = useRunLimit('rideflow_rider_runs', 3)
   const prevWsStatusRef = useRef<string>('disconnected')
   const isDoneRef        = useRef(false)
 
@@ -443,7 +446,7 @@ export default function RiderDashboard() {
   }, [addLog, toast])
 
   const handleGoOffline = useCallback(() => {
-    // Reset the entire ride session so the next online cycle starts fresh
+    incrementRun()
     setRideId(null)
     setRideStatus(null)
     setSurgeMultiplier(1.0)
@@ -779,11 +782,31 @@ export default function RiderDashboard() {
                 <button
                   className={`btn btn-sm ${riderActive ? 'btn-danger' : 'btn-success'}`}
                   onClick={riderActive ? handleGoOffline : handleGoOnline}
-                  disabled={!!rideId && !isDone}
+                  disabled={(!!rideId && !isDone) || (!riderActive && limitReached)}
                   style={{ minWidth: 96, flexShrink: 0 }}
                 >
                   {riderActive ? 'Go Offline' : 'Go Online'}
                 </button>
+              </div>
+
+              {/* Usage counter banner */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 10px', borderRadius: 6,
+                background: limitReached ? 'rgba(220,38,38,0.08)' : 'rgba(0,0,0,0.03)',
+                border: `1px solid ${limitReached ? 'rgba(220,38,38,0.2)' : 'var(--border)'}`,
+              }}>
+                <span style={{ fontSize: 11, color: limitReached ? 'var(--red)' : 'var(--text-muted)' }}>
+                  {limitReached ? 'Demo limit reached' : `Rider sessions: ${runsUsed} / ${limit}`}
+                </span>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  {Array.from({ length: limit }).map((_, i) => (
+                    <span key={i} style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: i < runsUsed ? 'var(--red)' : 'var(--border)',
+                    }} />
+                  ))}
+                </span>
               </div>
 
               <div className="field">
@@ -1058,7 +1081,46 @@ export default function RiderDashboard() {
         </div>
       </div>
 
+      {(limitReached || globalLimitReached) && (
+        <UsageLimitModal
+          page="Rider Dashboard"
+          runsUsed={runsUsed}
+          limit={limit}
+          isGlobal={globalLimitReached && !limitReached}
+        />
+      )}
+
       <InfoModal open={showExplainModal} title="Rider Guide: Simple Flow" onClose={() => setShowExplainModal(false)}>
+        {/* Run-limit notice */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(234,179,8,0.18) 0%, rgba(234,179,8,0.08) 100%)',
+          border: '1.5px solid rgba(234,179,8,0.55)',
+          borderRadius: 10, padding: '14px 16px', marginBottom: 4,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 800, color: '#b45309',
+            textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8,
+          }}>
+            Demo Run Limit
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.65, margin: 0 }}>
+            The <strong>Rider Dashboard</strong> allows{' '}
+            <span style={{ color: '#dc2626', fontWeight: 800, fontSize: 14 }}>3 free runs</span>.{' '}
+            One run is counted each time you click{' '}
+            <strong style={{ color: '#dc2626' }}>Go Offline</strong>.{' '}
+            Runs are stored in your browser and persist across refreshes.
+          </p>
+          <div style={{
+            marginTop: 10, display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 10px', background: 'rgba(0,0,0,0.06)', borderRadius: 6,
+          }}>
+            <span style={{ fontSize: 18 }}>🔒</span>
+            <span style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.5 }}>
+              Once the limit is hit, a modal blocks the page. Return to Home to reset your session.
+            </span>
+          </div>
+        </div>
+
         <div className="info-modal-block">
           <div className="info-modal-block-title">Goal</div>
           <p className="info-modal-block-text">Book one ride and follow it live from request to receipt — driver found, arriving, trip, done.</p>

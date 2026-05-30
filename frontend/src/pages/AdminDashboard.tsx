@@ -9,6 +9,8 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import { InfoModal } from '../components/InfoModal'
 import { useToast } from '../components/Toast'
 import { MetricsDetailModal } from '../components/MetricsDetailModal'
+import { UsageLimitModal } from '../components/UsageLimitModal'
+import { useGlobalLimitListener } from '../hooks/useGlobalLimitListener'
 import type { MetricType, MetricItem } from '../components/MetricsDetailModal'
 import { getMetrics, demoReset, getAvailableDrivers } from '../api/client'
 import type { SystemMetrics, AvailableDriver } from '../api/client'
@@ -138,6 +140,7 @@ export default function AdminDashboard() {
   useEffect(() => { document.title = 'Admin | RideFlow AI' }, [])
 
   const { toast } = useToast()
+  const globalLimitReached = useGlobalLimitListener()
   const prevWsStatusRef = useRef<string>('disconnected')
   const [detailModal, setDetailModal] = useState<{ type: MetricType; count: number; items?: MetricItem[] } | null>(null)
 
@@ -192,9 +195,14 @@ export default function AdminDashboard() {
   const refreshMetrics = useCallback(async () => {
     try {
       const [metricsRes, driversRes] = await Promise.all([getMetrics(), getAvailableDrivers()])
-      setMetrics(metricsRes.data)
+      const m = metricsRes.data
+      setMetrics(m)
       setAvailableDrivers(driversRes.data)
       setLastRefresh(new Date().toTimeString().slice(0, 8))
+      if (m.drivers.total === 0 && m.rides.total === 0) {
+        setAiHotspots([])
+        setActiveAdminHotspotIdx(0)
+      }
     } catch {
       addLog(logEntry('error', 'Could not reach backend metrics endpoint.'))
       toast({
@@ -875,6 +883,15 @@ export default function AdminDashboard() {
           count={detailModal.count}
           items={detailModal.items}
           onClose={() => setDetailModal(null)}
+        />
+      )}
+
+      {globalLimitReached && (
+        <UsageLimitModal
+          page="Admin Dashboard"
+          runsUsed={0}
+          limit={3}
+          isGlobal
         />
       )}
 

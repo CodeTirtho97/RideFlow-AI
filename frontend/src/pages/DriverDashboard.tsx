@@ -7,6 +7,8 @@ import type { LogEntry } from '../components/EventLog'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { InfoModal } from '../components/InfoModal'
 import { useToast } from '../components/Toast'
+import { UsageLimitModal } from '../components/UsageLimitModal'
+import { useRunLimit } from '../hooks/useRunLimit'
 import {
   registerDriver,
   getDriver,
@@ -139,6 +141,7 @@ export default function DriverDashboard() {
   useEffect(() => { document.title = 'Driver | RideFlow AI' }, [])
 
   const { toast } = useToast()
+  const { runsUsed, limit, limitReached, globalLimitReached, incrementRun } = useRunLimit('rideflow_driver_runs', 3)
   const prevWsStatusRef = useRef<string>('disconnected')
 
   const [driverName,  setDriverName]  = useState('')
@@ -292,6 +295,7 @@ export default function DriverDashboard() {
       if (newStatus === 'available') {
         addLog(logEntry('event', "You're online! The system can now match you with nearby riders.", 'status: available · included in PostGIS dispatch pool'))
       } else {
+        incrementRun()
         setLastReceipt(null)
         addLog(logEntry('system', "You're offline. No new rides will be sent to you.", 'status: offline · removed from dispatch pool'))
       }
@@ -793,11 +797,30 @@ export default function DriverDashboard() {
           {driverId && (
             <div className="card">
               <div className="card-header"><span className="card-title">Availability</span></div>
-              <div className="card-body">
+              <div className="card-body flex-col gap-10">
+                {/* Usage counter banner */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '6px 10px', borderRadius: 6,
+                  background: limitReached ? 'rgba(220,38,38,0.08)' : 'rgba(0,0,0,0.03)',
+                  border: `1px solid ${limitReached ? 'rgba(220,38,38,0.2)' : 'var(--border)'}`,
+                }}>
+                  <span style={{ fontSize: 11, color: limitReached ? 'var(--red)' : 'var(--text-muted)' }}>
+                    {limitReached ? 'Demo limit reached' : `Driver sessions: ${runsUsed} / ${limit}`}
+                  </span>
+                  <span style={{ display: 'flex', gap: 4 }}>
+                    {Array.from({ length: limit }).map((_, i) => (
+                      <span key={i} style={{
+                        width: 7, height: 7, borderRadius: '50%',
+                        background: i < runsUsed ? 'var(--red)' : 'var(--border)',
+                      }} />
+                    ))}
+                  </span>
+                </div>
                 <button
                   className={`btn btn-full ${driverStatus === 'available' ? 'btn-danger' : 'btn-success'}`}
                   onClick={handleToggleOnline}
-                  disabled={loading || driverStatus === 'busy'}
+                  disabled={loading || driverStatus === 'busy' || (driverStatus === 'offline' && limitReached)}
                 >
                   {driverStatus === 'available' ? 'Go Offline' : 'Go Online'}
                 </button>
@@ -1025,7 +1048,46 @@ export default function DriverDashboard() {
         </div>
       </div>
 
+      {(limitReached || globalLimitReached) && (
+        <UsageLimitModal
+          page="Driver Dashboard"
+          runsUsed={runsUsed}
+          limit={limit}
+          isGlobal={globalLimitReached && !limitReached}
+        />
+      )}
+
       <InfoModal open={showExplainModal} title="Driver Guide: Simple Flow" onClose={() => setShowExplainModal(false)}>
+        {/* Run-limit notice */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(234,179,8,0.18) 0%, rgba(234,179,8,0.08) 100%)',
+          border: '1.5px solid rgba(234,179,8,0.55)',
+          borderRadius: 10, padding: '14px 16px', marginBottom: 4,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 800, color: '#b45309',
+            textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8,
+          }}>
+            Demo Run Limit
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.65, margin: 0 }}>
+            The <strong>Driver Dashboard</strong> allows{' '}
+            <span style={{ color: '#dc2626', fontWeight: 800, fontSize: 14 }}>3 free runs</span>.{' '}
+            One run is counted each time you click{' '}
+            <strong style={{ color: '#dc2626' }}>Go Offline</strong>.{' '}
+            Runs are stored in your browser and persist across refreshes.
+          </p>
+          <div style={{
+            marginTop: 10, display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 10px', background: 'rgba(0,0,0,0.06)', borderRadius: 6,
+          }}>
+            <span style={{ fontSize: 18 }}>🔒</span>
+            <span style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.5 }}>
+              Once the limit is hit, a modal blocks the page. Return to Home to reset your session.
+            </span>
+          </div>
+        </div>
+
         <div className="info-modal-block">
           <div className="info-modal-block-title">Goal</div>
           <p className="info-modal-block-text">Go online, receive a dispatch, and complete one trip lifecycle.</p>

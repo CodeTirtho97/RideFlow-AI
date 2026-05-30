@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
+import { useGlobalLimitListener } from '../hooks/useGlobalLimitListener'
 
 function SunIcon() {
   return (
@@ -27,14 +28,39 @@ function MoonIcon() {
   )
 }
 
+function LockIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+      style={{ marginLeft: 4, opacity: 0.65, flexShrink: 0 }}>
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  )
+}
+
 export function AppNav() {
   const { theme, toggle } = useTheme()
+  const limitReached = useGlobalLimitListener()
+
   return (
     <nav className="topbar-nav">
       <NavLink to="/" end>Home</NavLink>
-      <NavLink to="/playground">Playground</NavLink>
-      <NavLink to="/rider">Rider</NavLink>
-      <NavLink to="/driver">Driver</NavLink>
+      <NavLink to="/playground">
+        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+          Playground{limitReached && <LockIcon />}
+        </span>
+      </NavLink>
+      <NavLink to="/rider">
+        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+          Rider{limitReached && <LockIcon />}
+        </span>
+      </NavLink>
+      <NavLink to="/driver">
+        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+          Driver{limitReached && <LockIcon />}
+        </span>
+      </NavLink>
       <NavLink to="/admin">Admin</NavLink>
       <NavLink to="/architecture">Architecture</NavLink>
       <button
